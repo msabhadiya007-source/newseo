@@ -1,0 +1,334 @@
+{
+  "project_name": "UrbanDotted SEO Operations",
+  "app_archetype": "Dashboard / Internal SaaS Admin Operations Tool",
+  "target_audience": "Shopify SEO Managers, Ecommerce Operations Specialists, Technical SEO Auditors",
+  "design_mission": "Create a high-density, authoritative, tactical desktop-first Shopify SEO management command center for 35,000+ catalog items. It balances high data correlation, explainable 0-100 SEO scoring, zero-risk safety guardrails (SEO-only write restrictions), and rapid batch workflows with Swiss Brutalist contrast and crystal-clear visual hierarchy.",
+  "theme_strategy": {
+    "default_mode": "dark",
+    "theme_toggle": true,
+    "dark_theme_personality": "Deep Slate & Tactical Obsidian (#090D16, #0F172A, #1E293B) with crisp 1px borders (#334155), electric cyan & amber status indicators, and luminous green health accents.",
+    "light_theme_personality": "Clean Swiss Surgical White & Neutral Canvas (#F8FAFC, #FFFFFF) with sharp contrast slate borders (#E2E8F0) and vibrant semantic indicators."
+  },
+  "typography": {
+    "pairing_archetype": "The Old Money Tech & Swiss Brutalist Hybrid",
+    "font_family_headings": "Outfit, Cabinet Grotesk, system-ui, sans-serif",
+    "font_family_body": "IBM Plex Sans, Inter, system-ui, sans-serif",
+    "font_family_mono": "JetBrains Mono, Roboto Mono, monospace",
+    "scale": {
+      "h1": "text-3xl sm:text-4xl font-bold tracking-tight",
+      "h2": "text-2xl sm:text-3xl font-semibold tracking-tight",
+      "h3": "text-lg sm:text-xl font-medium tracking-tight",
+      "h4": "text-base font-semibold",
+      "body": "text-sm leading-relaxed",
+      "caption": "text-xs font-mono uppercase tracking-wider text-muted-foreground",
+      "data_metric": "text-3xl sm:text-4xl font-bold tracking-tight font-mono"
+    },
+    "typesetting_rules": [
+      "Overlines & Meta Badges MUST be uppercase with tracking-[0.15em] and font-mono",
+      "Headings strictly use tracking-tight or tracking-tighter with font-semibold or font-bold",
+      "Character counters (e.g. 52/60, 148/160) MUST use font-mono for zero jitter during typing",
+      "Never use Inter for Main page headings; use Outfit or Cabinet Grotesk"
+    ]
+  },
+  "color_palette": {
+    "status_color_system": {
+      "good_green": {
+        "badge_bg": "bg-emerald-500/15 dark:bg-emerald-500/20",
+        "badge_text": "text-emerald-700 dark:text-emerald-400",
+        "border": "border-emerald-500/30",
+        "indicator_hex": "#10B981",
+        "meaning": "Fully Optimised / SEO Pass / Score 85-100"
+      },
+      "needs_improvement_yellow": {
+        "badge_bg": "bg-amber-500/15 dark:bg-amber-500/20",
+        "badge_text": "text-amber-700 dark:text-amber-400",
+        "border": "border-amber-500/30",
+        "indicator_hex": "#F59E0B",
+        "meaning": "Needs Improvement / Warning / Score 50-84"
+      },
+      "critical_red": {
+        "badge_bg": "bg-rose-500/15 dark:bg-rose-500/20",
+        "badge_text": "text-rose-700 dark:text-rose-400",
+        "border": "border-rose-500/30",
+        "indicator_hex": "#EF4444",
+        "meaning": "Critical SEO Issues / Missing SEO Title or Meta Description / Score 0-49"
+      },
+      "draft_blue": {
+        "badge_bg": "bg-sky-500/15 dark:bg-sky-500/20",
+        "badge_text": "text-sky-700 dark:text-sky-400",
+        "border": "border-sky-500/30",
+        "indicator_hex": "#0EA5E9",
+        "meaning": "Draft / Staged / In-Progress AI Run / Pending Shopify Sync"
+      }
+    },
+    "neutral_scale": {
+      "app_bg": "bg-slate-950 dark:bg-[#070B14]",
+      "card_surface": "bg-slate-900/90 dark:bg-[#0E1526]/95",
+      "card_surface_elevated": "bg-slate-800/80 dark:bg-[#151F38]",
+      "sidebar_bg": "bg-slate-900/95 dark:bg-[#0A0F1D]",
+      "header_bg": "bg-slate-900/85 dark:bg-[#0A0F1D]/90 backdrop-blur-md",
+      "border_subtle": "border-slate-800 dark:border-slate-800/80",
+      "border_focused": "border-cyan-500/50",
+      "text_primary": "text-slate-100 dark:text-slate-50",
+      "text_secondary": "text-slate-400 dark:text-slate-400",
+      "text_muted": "text-slate-500 dark:text-slate-500"
+    },
+    "brand_accents": {
+      "primary_cyan": "#06B6D4",
+      "electric_indigo": "#6366F1",
+      "shopify_brand_green": "#95BF47"
+    }
+  },
+  "layout_and_navigation": {
+    "app_shell": {
+      "sidebar": {
+        "type": "Fixed collapsible desktop navigation (w-64 expanded, w-20 collapsed)",
+        "brand_header": "UrbanDotted SEO Operations + Live Shopify Store Badge (35,420 Items)",
+        "nav_items": [
+          { "id": "dashboard", "label": "SEO Health Command", "icon": "LayoutDashboard", "path": "/" },
+          { "id": "products", "label": "Products SEO Queues", "icon": "ShoppingBag", "badge": "35,420", "path": "/products" },
+          { "id": "collections", "label": "Collections SEO", "icon": "FolderTree", "badge": "142", "path": "/collections" },
+          { "id": "bulk-editor", "label": "Bulk Spreadsheet Grid", "icon": "Table2", "path": "/bulk" },
+          { "id": "ai-workspace", "label": "AI SEO Engine", "icon": "Sparkles", "path": "/ai-workspace" },
+          { "id": "job-center", "label": "Job Center & Batch Runs", "icon": "Activity", "badge": "2 active", "path": "/jobs" },
+          { "id": "csv-tool", "label": "CSV Import / Export", "icon": "ArrowDownUp", "path": "/csv" },
+          { "id": "audit-log", "label": "Audit & Rollback Log", "icon": "History", "path": "/audit" },
+          { "id": "settings", "label": "Store & Rule Settings", "icon": "Settings", "path": "/settings" }
+        ],
+        "safety_guardrail_banner": "SEO-Only Guardrail Active: Commerce fields (Price, Inventory, SKU) are strictly read-only locked."
+      },
+      "top_header": {
+        "elements": [
+          "Global Quick Search (Cmd+K) for products, collections, SKUs",
+          "Shopify Store Sync Status (Connected: urbandotted.myshopify.com • Synced 2m ago)",
+          "Pending Sync Counter badge (e.g. '14 Drafts Ready to Publish')",
+          "Quick Batch Action trigger button",
+          "Theme toggle (Dark/Light)",
+          "Operator Profile (SEO Lead)"
+        ]
+      }
+    }
+  },
+  "core_screens_and_components": {
+    "screen_1_dashboard": {
+      "title": "SEO Health Metrics & Audit Command",
+      "sections": [
+        {
+          "name": "Global Health Hero Bento",
+          "components": [
+            "Overall SEO Health Score Gauge (e.g. 74/100 - Good with +4.2% this week)",
+            "Total Products Metric Card (35,420 indexed)",
+            "Fully Optimised Card (18,940 - 53.5% green)",
+            "Needs Improvement Card (10,830 - 30.6% amber)",
+            "Missing SEO Card (3,410 - 9.6% red)",
+            "Critical Issues Card (2,240 - 6.3% red)"
+          ]
+        },
+        {
+          "name": "Audit Radar & Issue Categories Breakdown",
+          "components": [
+            "Issue Queue Distribution Bar (Missing Title, Missing Description, Over 60 chars, Over 160 chars, Missing Image Alt Text, Keyword Cannibalization)",
+            "Collection SEO Readiness Donut Chart (112 Optimised / 30 Missing)",
+            "SEO Velocity & Activity Sparklines (Daily automated & manual fixes)"
+          ]
+        },
+        {
+          "name": "High-Priority Action Queues",
+          "components": [
+            "Top 5 High-Traffic Products with Missing SEO",
+            "Recent Batch Jobs Quick Status Widget",
+            "One-Click Optimization Queue shortcut buttons"
+          ]
+        }
+      ]
+    },
+    "screen_2_products_list": {
+      "title": "Products SEO Table & Issue-Category Queues",
+      "features": [
+        "Queue Tabs with live count badges: [All (35,420), Missing SEO (3,410), Critical Issues (2,240), Needs Improvement (10,830), Good (12,450), Fully Optimised (6,490), Drafts/Staged (42)]",
+        "Server-side simulated fast pagination (25, 50, 100 rows per page)",
+        "Deep Filtering: By Collection, Product Type, Vendor, Price tier, Missing Alt Count, SEO Score Range (0-100), Status",
+        "Row Information: Thumbnail, Product Title (read-only), SKU & Inventory (with lock icon), Current SEO Title & Meta snippet, Character counts, Live Score badge (0-100), Status badge (Good/Yellow/Red/Draft), Action button 'Open Live Editor'",
+        "Batch Actions Toolbar: Multi-select rows -> 'Generate AI SEO in Batch', 'Publish to Shopify', 'Revert to Shopify Original', 'Mark as Reviewed'"
+      ]
+    },
+    "screen_3_live_seo_editor": {
+      "title": "Live SEO Editor with Read-Only Commerce Safety Lock",
+      "layout": "3-Column Tactical Split-Pane View",
+      "left_panel": {
+        "title": "Shopify Commerce Data (READ ONLY)",
+        "badge": "LOCKED: Safety Guardrail Active",
+        "elements": [
+          "Product Primary Image & Media Gallery (with Alt Text Quick-Edit pills)",
+          "Shopify Product Title (Lock icon, copy button)",
+          "Product Handle / Slug (/products/urban-oversized-heavyweight-hoodie-black)",
+          "Vendor, Product Type, Tags, Collections List",
+          "SKU: UBD-HD-001 • Inventory: 428 in stock • Price: $89.00 • Status: Active (All with lock icons)",
+          "Shopify Description HTML Preview snippet"
+        ]
+      },
+      "center_panel": {
+        "title": "SEO Live Fields & SERP Preview",
+        "elements": [
+          "SEO Title Input: Live character counter (e.g. 54 / 60 char max recommended), colored progress bar (Green: 45-60, Yellow: 30-44 or 61-70, Red: <30 or >70). Auto-variables button ({{title}} | {{vendor}} | UrbanDotted).",
+          "SEO Meta Description Textarea: Live character counter (e.g. 148 / 160 char max recommended), colored progress meter (Green: 130-160, Yellow: 100-129 or 161-175, Red: <100 or >175). Auto-variables button ({{title}}, {{price}}, {{tags}}).",
+          "Image Alt Text Matrix: List of all product images with live alt text input & 'Auto-generate descriptive Alt' action.",
+          "Live Google SERP Preview Card (Desktop & Mobile view toggles): Realistic Google Search Result with favicon, url breadcrumbs, bold keywords matching query, title truncated with ellipsis if >60 chars, snippet truncated if >160 chars.",
+          "Action Toolbar: 'Save as Draft', 'Publish Immediately to Shopify', 'AI Rewrite Suggestions', 'Discard Changes'"
+        ]
+      },
+      "right_panel": {
+        "title": "Explainable 0-100 SEO Score & Rules Engine",
+        "elements": [
+          "Circular SEO Score Dial (0-100) with rating pill (e.g. '92 - EXCELLENT')",
+          "Score Impact Breakdown: Positives (+ Points) & Problems (- Deductions)",
+          "Rules Checklist: (1) Primary keyword in title (+20), (2) Optimal title length 45-60c (+15), (3) Unique meta description (+15), (4) Description length 130-160c (+15), (5) Call-to-action in snippet (+10), (6) Brand suffix attached (+10), (7) Alt text on all images (+15)",
+          "AI Optimization Assistant Drawer: Quick 1-click apply prompts ('High CTR Formula', 'E-commerce Buyer Intent', 'Feature-Focused', 'Minimalist Luxury')"
+        ]
+      }
+    },
+    "screen_4_collections_seo": {
+      "title": "Collections SEO Optimizer",
+      "features": [
+        "Table of all 142 store collections (e.g., 'Streetwear Hoodies', 'Oversized Tees', 'Acid Wash Denim')",
+        "Live collection SEO Title, Collection Meta Description, and H1 Rules",
+        "Quick modal editor with live SERP preview for category pages",
+        "Batch fill template for collections (e.g. 'Shop {Collection_Title} - UrbanDotted Streetwear Collection')"
+      ]
+    },
+    "screen_5_bulk_spreadsheet": {
+      "title": "High-Performance Bulk Spreadsheet Editor",
+      "features": [
+        "Excel/Airtable style editable data grid with keyboard navigation (Arrow keys, Enter, Tab)",
+        "Columns: Checkbox, ID, Title (locked), SEO Title (editable inline), SEO Title Len, SEO Meta (editable inline), SEO Meta Len, Score, Alt Text Status, Sync Status",
+        "Bulk Find & Replace tool (e.g. replace 'Buy Online' with 'Shop Official')",
+        "Formula / Pattern Applier (e.g. Apply '{{title}} | Free Shipping | UrbanDotted' to selected 50 rows)",
+        "Staged Changes Counter with one-click 'Sync 50 Selected to Shopify'"
+      ]
+    },
+    "screen_6_ai_workspace": {
+      "title": "AI SEO Engine & Prompt Playground",
+      "features": [
+        "Batch AI SEO Generator with customizable tone of voice (Urban Streetwear, High-End Minimalist, Technical Specs, Urgency/Hype)",
+        "Rule presets: Target keyword placement, Brand suffix format, Call-to-action inclusions",
+        "Interactive Prompt Tester with before/after diff preview",
+        "Queue Runner with concurrency controls and safety filters"
+      ]
+    },
+    "screen_7_job_center": {
+      "title": "Job Center & Background Task Execution",
+      "features": [
+        "Active Job Progress Tracker with animated percentage progress and ETA",
+        "Completed, Failed, and Queued batch job history",
+        "Detailed execution logs per product ID with error recovery actions"
+      ]
+    },
+    "screen_8_csv_import_export": {
+      "title": "CSV Import/Export with Validation Sandbox",
+      "features": [
+        "Drag-and-drop CSV uploader for bulk SEO changes",
+        "Preview & Validation Matrix: Flags character count violations and missing fields before applying",
+        "Full Catalog SEO Export (formatted for Shopify or UrbanDotted backup)"
+      ]
+    },
+    "screen_9_audit_and_rollback": {
+      "title": "Audit Log & One-Click Rollback Engine",
+      "features": [
+        "Chronological history of every SEO title and meta description published",
+        "Who changed it (AI Batch Engine, Operator John D., Bulk CSV)",
+        "Visual Diff (Red strikethrough for deleted text, Green highlight for added text)",
+        "One-click 'Rollback to this version' button with safety confirmation"
+      ]
+    },
+    "screen_10_settings": {
+      "title": "Store Connection & SEO Rule Configuration",
+      "features": [
+        "Shopify API Credentials & Webhook Sync Status (Read Product Data, Write SEO Metafields only)",
+        "Strict Guardrail Enforcement Toggles (e.g., 'Disallow writing to Shopify price/inventory')",
+        "SEO Length Thresholds Configuration (Title Min/Max, Meta Min/Max)",
+        "Forbidden Keyword and Duplicate Title Detection Rules"
+      ]
+    }
+  },
+  "visual_enhancers": {
+    "tactical_borders": "1px solid border-slate-800 dark:border-slate-800/80 with subtle hover highlights",
+    "crystal_glass_header": "backdrop-blur-md bg-slate-900/80 dark:bg-[#0A0F1D]/85 border-b border-slate-800",
+    "serp_box_styling": "Realistic Google SERP mockup with clean white/dark card, Google blue link (#1A0DAB / #8AB4F8), green URL (#006621 / #34A853), and neutral snippet snippet",
+    "score_rings": "Dynamic SVG circular progress meter with gradient stroke reflecting score (Green > 85, Amber 50-84, Red < 50)",
+    "locked_field_styling": "Subtle hatched or muted background with small amber lock badge signaling READ ONLY to operators"
+  },
+  "media_assets": [
+    {
+      "category": "product_hero_hoodie",
+      "url": "https://images.unsplash.com/photo-1510853851847-5c02796e8c8a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHw0fHxhcHBhcmVsJTIwZWNvbW1lcmNlJTIwbW9kZXJuJTIwc3RyZWV0d2VhcnxlbnwwfHx8fDE3ODc1Nzk3Mzd8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Urban Streetwear Heavyweight Hoodie for product mockup"
+    },
+    {
+      "category": "product_crewneck_tee",
+      "url": "https://images.unsplash.com/photo-1599012307530-d163bd04ecab?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwzfHxhcHBhcmVsJTIwZWNvbW1lcmNlJTIwbW9kZXJuJTIwc3RyZWV0d2VhcnxlbnwwfHx8fDE3ODc1Nzk3Mzd8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Urban Oversized Boxy Tee streetwear apparel"
+    },
+    {
+      "category": "product_rack_collection",
+      "url": "https://images.unsplash.com/photo-1625698311031-f0dd15be5144?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwxfHxhcHBhcmVsJTIwZWNvbW1lcmNlJTIwbW9kZXJuJTIwc3RyZWV0d2VhcnxlbnwwfHx8fDE3ODc1Nzk3Mzd8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Apparel collection rack for Collections SEO view"
+    },
+    {
+      "category": "product_jacket_model",
+      "url": "https://images.unsplash.com/photo-1576775068668-c147f14c36f7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwyfHxhcHBhcmVsJTIwZWNvbW1lcmNlJTIwbW9kZXJuJTIwc3RyZWV0d2VhcnxlbnwwfHx8fDE3ODc1Nzk3Mzd8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Black Techwear Bomber Jacket model"
+    }
+  ],
+  "testing_attributes": {
+    "rule": "Every interactive and key informational element MUST include a unique, descriptive data-testid attribute in kebab-case format.",
+    "key_test_ids": [
+      "dashboard-seo-health-score",
+      "dashboard-metric-total-products",
+      "dashboard-metric-missing-seo",
+      "dashboard-metric-needs-improvement",
+      "dashboard-metric-critical-issues",
+      "dashboard-metric-fully-optimised",
+      "products-queue-tab-all",
+      "products-queue-tab-missing",
+      "products-queue-tab-critical",
+      "products-queue-tab-needs-improvement",
+      "products-queue-tab-good",
+      "products-queue-tab-optimised",
+      "products-queue-tab-drafts",
+      "products-table-search-input",
+      "products-table-row",
+      "products-table-edit-button",
+      "editor-locked-price-badge",
+      "editor-locked-sku-badge",
+      "editor-locked-inventory-badge",
+      "editor-seo-title-input",
+      "editor-seo-title-counter",
+      "editor-seo-meta-textarea",
+      "editor-seo-meta-counter",
+      "editor-serp-preview-card",
+      "editor-score-dial",
+      "editor-save-draft-btn",
+      "editor-publish-shopify-btn",
+      "editor-ai-suggest-btn",
+      "bulk-spreadsheet-grid",
+      "bulk-find-replace-btn",
+      "bulk-apply-template-btn",
+      "ai-workspace-generate-btn",
+      "job-center-active-progress",
+      "csv-upload-dropzone",
+      "audit-log-rollback-btn",
+      "settings-guardrail-toggle",
+      "theme-toggle-btn"
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Build the complete UrbanDotted SEO Operations platform as an enterprise-grade, high-density React application.",
+    "Implement rich mock datasets covering all 35,420 product statistics with realistic simulated server-side pagination, search, issue-queue switching, sorting, and multi-filter criteria.",
+    "Implement the full 3-column Live SEO Editor with real-time character counters, progress indicator colors, live Google SERP preview (desktop & mobile toggle), explainable 0-100 score engine with positive and deduction breakdown, and locked Shopify commerce fields.",
+    "Provide the interactive Bulk Spreadsheet Editor with inline cell editing, formula applier, and find-and-replace.",
+    "Provide the AI SEO Engine workspace with tone selector, target keyword prompts, and 1-click batch generation preview.",
+    "Provide Job Center with active animated progress bars, CSV validation matrix, and Audit Log with visual before/after diffs and rollback actions.",
+    "Include toast notifications (Sonner) on all actions (Save Draft, Publish to Shopify, Batch Run, Rollback).",
+    "Ensure all components are strictly .js / .jsx compatible with Tailwind CSS and Radix/Lucide icons, and include data-testid attributes for automated verification."
+  ]
+}

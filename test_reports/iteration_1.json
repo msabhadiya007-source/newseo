@@ -1,0 +1,92 @@
+{
+  "summary": "Full backend + frontend E2E validation of UrbanDotted SEO Operations. Backend: 96 pytest tests across auth/RBAC, the SEO-only write allowlist (security acceptance), dashboard metrics, products list/pagination/tabs/filters/search, SEO issue detection, the draft->publish->verify->queue-removal acceptance flow, rollback, collections, sync/jobs, audit, settings, diagnostics and AI suggest. All 96 passed (2 skipped: /health not reachable via ingress, destructive sync guarded behind RUN_DESTRUCTIVE_SYNC=1). CRITICAL SECURITY ACCEPTANCE PASSED: all 10 forbidden payload variants (price, inventory, sku, product_title, title, barcode, vendor, status, variants, and a mixed seo_title+price payload) return HTTP 403 with 'NON_SEO_FIELD_WRITE_DENIED' on product seo-draft, product publish-seo, collection seo-draft and collection publish-seo, with byte-for-byte verification that no commerce or SEO field mutated and publication_status was untouched. Frontend: login (valid+invalid), dashboard metric cards/health dial, nav, all 7 queue tabs, search, issue filter, 3-column editor (locked price/SKU/inventory badges with zero editable inputs, live title/meta counters, SERP preview, score dial), Save Draft and Publish toasts (score went 4 -> 96 after publish), and Collections/Jobs/Audit/Settings pages all verified working. Viewer-role UI gating verified (sync button hidden, Save Draft/Publish disabled, Rollback/AI hidden, Settings save hidden). No blocking defects found.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/auth/login",
+        "issue": "Brute-force lockout is keyed on f\"{request.client.host}:{email}\". Behind the k8s ingress request.client.host is the rotating proxy pod IP (observed 10.79.139.10 and .11), so failed attempts are split across multiple counters and the 5-attempt lockout does NOT fire at 5 through the public URL (took ~10 attempts). Logic is correct when hit on localhost:8001 (401x5 then 429). Fix: derive the client IP from X-Forwarded-For, or key the counter on the email alone."
+      },
+      {
+        "endpoint": "POST /api/products/{id}/rollback",
+        "issue": "The rollback audit record writes changes with field names 'current_seo_title'/'current_seo_description' while publish records use 'seo_title'/'meta_description', and it always sets old=null. Consequences: (a) the audit trail loses the value the rollback overwrote, (b) the Audit UI renders inconsistent field labels, (c) a second rollback can never match and returns 400 'Nothing to roll back' (no redo/undo of a rollback). Verified live."
+      },
+      {
+        "endpoint": "GET /health, GET /ready",
+        "issue": "Both are registered without the /api prefix, so through the ingress they are routed to the React dev server and return HTML, not JSON. They only work on localhost:8001. Mount them as /api/health and /api/ready (or keep the existing /api/diagnostics as the sole external probe)."
+      },
+      {
+        "endpoint": "POST /api/sync (DEMO branch)",
+        "issue": "run_sync_job does db.products.delete_many({'data_source':'demo'}) and regenerates from scratch, so every sync silently destroys all published/draft SEO work while the audit_log keeps orphaned resource_ids that no longer resolve. Needs a merge/upsert-by-handle path (and it will matter even more for the real Shopify branch)."
+      },
+      {
+        "endpoint": "POST /api/products/{id}/publish-seo",
+        "issue": "With an empty body on a product that has no draft and no current SEO, it publishes empty strings, sets publication_status='verified' and writes an audit record with an empty changes[] array. Should reject with 400 when the resolved title/meta are both blank."
+      },
+      {
+        "endpoint": "GET /api/products",
+        "issue": "The 'missing' query param silently overwrites the 'issue' filter (both assign q['issue_codes']); combining them returns wrong results instead of an error or an $and."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Editor character counters / rules",
+        "issue": "ProductEditor.jsx hardcodes const RULES = {title_min:50,title_max:60,meta_min:140,meta_max:160} instead of reading GET /api/settings. If an admin changes the ranges on the Settings page, the editor counters, the coloured progress bars and the 'Recommended 50-60' labels keep showing the stale defaults while the backend scores against the new rules.",
+        "affected_selectors": ["editor-seo-title-counter", "editor-seo-meta-counter"]
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "Product editor / products table images",
+        "issues": [
+          "The demo image pool in /app/backend/seed.py contains photos irrelevant to the catalogue - e.g. https://images.unsplash.com/photo-1616353071855-2c3d1f6f6f4e renders a city-skyscraper photo for 'UrbanDotted iPhone 16 Clear Case - Lavender'. Replace with phone-case imagery so the demo looks credible."
+        ]
+      },
+      {
+        "screen": "Products list",
+        "issues": [
+          "The page-size <select> has no data-testid (only the issue filter does), which makes the pagination-size control untestable. Layout, contrast and spacing were otherwise clean in both dark and light themes."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/test_auth.py",
+    "/app/backend/tests/test_security_seo_only.py",
+    "/app/backend/tests/test_core_flows.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix brute-force lockout to use the X-Forwarded-For client IP (or key on email only) so the 5-attempt 429 fires through the ingress.",
+    "Normalise rollback audit field names to seo_title/meta_description and record the real old value so the audit trail is complete and a rollback is itself reversible.",
+    "Expose health/readiness under /api (e.g. /api/health, /api/ready) so they are reachable through the ingress.",
+    "Make POST /api/sync non-destructive (upsert by handle) so published SEO work and audit references survive a re-sync.",
+    "Reject publish-seo when the resolved seo_title and meta_description are both empty (400) instead of writing blanks and an empty audit entry.",
+    "Load SEO rules from GET /api/settings in ProductEditor.jsx instead of the hardcoded RULES constant.",
+    "Swap the irrelevant Unsplash images in seed.py for phone-case imagery and add a data-testid to the products page-size select."
+  ],
+  "critical_code_review_comments": [
+    "server.py sets allow_credentials=True together with allow_origins=['*'] (CORS_ORIGINS='*' short-circuits the explicit-origin list). Browsers reject that combination for credentialed requests. It is harmless today because the app authenticates with a Bearer header, but auth.get_current_user already reads a cookie named 'access_token' that /api/auth/login never sets - so the cookie path is dead code that will break the moment it is used. Either drop the cookie branch or set an httpOnly cookie and pin CORS_ORIGINS to the explicit FRONTEND_URL.",
+    "auth.seed_admin correctly re-hashes when ADMIN_PASSWORD changes and hashes are $2b$ bcrypt (unit-verified) - good. However db.login_attempts has no TTL index, so failed-login documents accumulate forever; add an expireAfterSeconds index on locked_until/updated_at.",
+    "jobs.run_sync_job's real-Shopify branch is a no-op stub ('Real Shopify sync would paginate the Admin GraphQL API here') - the app cannot actually ingest a 35k-product store yet. Flag this clearly as unimplemented rather than a silently 'completed' job.",
+    "routes.publish_product sets publication_status='publishing' and returns 409 on a concurrent publish, but the guard is a non-atomic find-then-update; use a single find_one_and_update with a status filter to make it race-safe.",
+    "The SEO-only allowlist implementation is sound: assert_seo_only rejects any key outside {seo_title, meta_description}, it is enforced at both the route boundary (_guard) and inside shopify_client.publish_*_seo, and the GraphQL mutation input only ever contains id + seo{}. No non-SEO write path exists."
+  ],
+  "updated_files": [
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/test_auth.py",
+    "/app/backend/tests/test_security_seo_only.py",
+    "/app/backend/tests/test_core_flows.py"
+  ],
+  "success_rate": {"backend": "100% (96/96 executed, 2 intentionally skipped)", "frontend": "100% of executed checks passed"},
+  "seed_data_creation": "Created and then deleted transient RBAC users (test_viewer_*, test_seo_editor_*, test_lock_*) and a qa_viewer@example.com viewer used for the browser RBAC test; all removed from db.users along with their login_attempts rows. Demo catalogue (2500 products / 40 collections) was re-seeded by the sync test; several products now carry test SEO titles/meta from the acceptance publish flow, which is harmless.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "Admin msabhadiya007@gmail.com / UrbanSEO@2026 (from /app/memory/test_credentials.md). Non-admin users are created on demand by tests/test_auth.py::TestRBAC and cleaned up.",
+  "context_for_next_testing_agent": "Test suite lives in /app/backend/tests (conftest.py + test_auth.py + test_security_seo_only.py + test_core_flows.py). Run `cd /app/backend && python -m pytest tests/ -q`; pytest.ini forces -n 2 --dist loadscope. TestSyncJobs is DESTRUCTIVE (POST /api/sync deletes and regenerates every demo product) and is therefore skipped unless RUN_DESTRUCTIVE_SYNC=1 is set - run it alone with -n 0, never alongside the rest, otherwise TestSeoDetection/TestDashboardMetrics fail spuriously on an empty bucket. /health and /ready are only reachable on localhost:8001, not via the public URL; use /api/diagnostics externally. All security-allowlist assertions and the draft->publish->verify->queue-removal->rollback acceptance chain pass and should be treated as regression baselines. Not yet exercised: Bulk Editor and CSV Import/Export pages (both are 19-line placeholder stubs), and the AI SEO Engine page (only /api/products/{id}/ai-suggest was tested and it responded successfully with the Emergent LLM key).",
+  "rca_of_the_issue": "Brute-force lockout: db.login_attempts documents were keyed '10.79.139.10:<email>' and '10.79.139.11:<email>' with counts 4 and 3 for the same 7 attempts, proving the ingress terminates connections from a pool of proxy pods so request.client.host is not the real client. Reproduce: POST /api/auth/login with a bad password 5 times against the public URL - still 401. Same 5 requests to localhost:8001 return 401,401,401,401,401 then 429. Mitigation: parse the first entry of the X-Forwarded-For header for the identifier. Rollback field mismatch: routes.rollback_product builds its audit changes with the Mongo column names (current_seo_title) while it matches on the API names (seo_title) when restoring, so a rollback record can never be consumed by a subsequent rollback - reproduced live, second rollback returns 400 'Nothing to roll back'."
+}
