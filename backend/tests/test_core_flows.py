@@ -336,7 +336,7 @@ class TestSettingsAudit:
         d = client.get(f"{API}/settings").json()
         assert d["rules"]["title_max"] > 0
         assert d["shopify"]["data_source"] == "demo"
-        assert d["demo_mode"] is True
+        assert d["shopify"]["mode"] == "demo"
 
     def test_update_settings_roundtrip(self, client):
         orig = client.get(f"{API}/settings").json()["rules"]
@@ -350,7 +350,7 @@ class TestSettingsAudit:
     def test_shopify_test_connection(self, client):
         d = client.get(f"{API}/settings/shopify/test").json()
         assert d["connected"] is False
-        assert d["status"] == "not_connected"
+        assert d["status"] == "demo_mode"
 
     def test_audit_pagination(self, client):
         d = client.get(f"{API}/audit?page=1&page_size=5").json()

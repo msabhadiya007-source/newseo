@@ -42,5 +42,14 @@ Production-ready, SEO-ONLY Shopify management platform for a store with ~35,000+
 
 ## Next Tasks
 1. Bulk spreadsheet editor + CSV import/export with validation preview.
-2. Real Shopify GraphQL paginated + incremental sync.
-3. Image ALT module + bulk AI generation jobs.
+2. Image ALT module + bulk AI generation jobs.
+
+## Phase 3.5 — Real Shopify Live Sync (COMPLETE & VERIFIED, this session)
+- Real Shopify Admin GraphQL ingestion in jobs.ingest_live (cursor pagination, incremental via updatedAt, non-destructive merge preserving local drafts + conflict flagging, deleted-record marking on full re-sync). Mock transport (SHOPIFY_MOCK_MODE=true) exercises the real code path without live credentials.
+- Rate-limit/cost handling in shopify_client._http_graphql: 429 + GraphQL "throttled" exponential backoff, proactive cost throttleStatus backoff, retry cap.
+- DEMO/LIVE strictly separated via APP_DATA_MODE + data_source; listings never mix.
+- SEO-only allowlist at route + shopify_client (product/collection seo.title/desc, image alt). Non-SEO writes -> 403 NON_SEO_FIELD_WRITE_DENIED.
+- Publish round-trip: draft -> validate -> Shopify SEO mutation -> verify -> reanalyze -> audit -> rollback (verify-publish verified_match=true).
+- Connection test friendly states (connected/authentication_failed/missing_permission/api_error/unavailable/demo_mode). No Shopify token exposed to frontend (server-side env only).
+- Verification: pytest 92 (demo) + tests/test_live_sync.py 20/20 (live+mock) + security 42/42 (both modes); independent API agent 74/74. 35k load test all queries sub-60ms on existing indexes.
+- NOTE: verified against MOCK transport; real store validation pending real SHOPIFY_STORE_DOMAIN/SHOPIFY_ADMIN_ACCESS_TOKEN (SHOPIFY_MOCK_MODE=false).
