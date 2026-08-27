@@ -1,4 +1,5 @@
 """Main API routes: dashboard, products, collections, sync, jobs, audit, settings, AI."""
+import os
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
 
@@ -15,6 +16,7 @@ from analysis import (
 )
 import jobs as jobs_mod
 import ai_service
+import seed
 
 api = APIRouter(prefix="/api")
 
@@ -40,6 +42,14 @@ def _source():
     return shopify_client.data_source
 
 
+def resolve_source(user: dict, source: str = None):
+    """Admins may explicitly target a data_source (demo/live/loadtest) for inspection;
+    everyone else uses the active env-controlled source."""
+    if source in ("demo", "live", "loadtest") and user.get("role") == "admin":
+        return source
+    return shopify_client.data_source
+
+
 def _guard(payload: dict, allowed: set):
     try:
         assert_seo_only(payload, allowed)
@@ -49,8 +59,8 @@ def _guard(payload: dict, allowed: set):
 
 # ---------------- Dashboard ----------------
 @api.get("/dashboard/metrics")
-async def dashboard_metrics(user: dict = Depends(get_current_user)):
-    source = _source()
+async def dashboard_metrics(user: dict = Depends(get_current_user), source: str = None):
+    source = resolve_source(user, source)
     total = await db.products.count_documents({"data_source": source})
     if total == 0:
         return {
@@ -152,9 +162,9 @@ async def list_products(
     page: int = 1, page_size: int = 25,
     bucket: str = "all", issue: str = None, search: str = None,
     min_score: int = None, max_score: int = None, missing: str = None,
-    sort: str = "seo_score", order: str = "asc",
+    sort: str = "seo_score", order: str = "asc", source: str = None,
 ):
-    source = _source()
+    source = resolve_source(user, source)
     q = _product_query(source, bucket, issue, search, min_score, max_score, missing)
     page_size = min(max(page_size, 1), 100)
     skip = (max(page, 1) - 1) * page_size
@@ -299,8 +309,8 @@ async def rollback_product(product_id: str, user: dict = Depends(require_permiss
 # ---------------- Collections ----------------
 @api.get("/collections")
 async def list_collections(user: dict = Depends(get_current_user),
-                           bucket: str = "all", search: str = None):
-    source = _source()
+                           bucket: str = "all", search: str = None, source: str = None):
+    source = resolve_source(user, source)
     q = {"data_source": source}
     if bucket and bucket != "all":
         q["status_bucket"] = bucket
@@ -359,29 +369,43 @@ async def publish_collection(collection_id: str, payload: dict = Body(...),
 
 # ---------------- Sync / Jobs ----------------
 @api.post("/sync")
-async def trigger_sync(user: dict = Depends(require_permission("sync"))):
-    import os
+async def trigger_sync(full_resync: bool = False, user: dict = Depends(require_permission("sync"))):
+    source = shopify_client.data_source
     count = int(os.environ.get("SEED_PRODUCT_COUNT", "2500"))
     ccount = int(os.environ.get("SEED_COLLECTION_COUNT", "40"))
-    job = await jobs_mod.create_job("Shopify Sync", count, user["email"])
-    jobs_mod.launch(jobs_mod.run_sync_job(job["id"], count, ccount))
-    return {"job_id": job["id"], "status": "queued"}
+    label = "Shopify Live Sync" if source == "live" else "Demo Sync"
+    if source == "live" and full_resync:
+        label = "Shopify Full Re-sync"
+    job = await jobs_mod.create_job(label, count if source == "demo" else 0, user["email"],
+                                    {"source": source, "full_resync": full_resync})
+    jobs_mod.launch(jobs_mod.run_sync_job(job["id"], source, full_resync, count, ccount))
+    return {"job_id": job["id"], "status": "queued", "source": source}
+
+
+@api.post("/shopify/live-sync")
+async def live_sync(full_resync: bool = True, user: dict = Depends(require_permission("settings"))):
+    """Admin maintenance: run LIVE Shopify ingestion (mock transport when SHOPIFY_MOCK_MODE)."""
+    job = await jobs_mod.create_job("Shopify Full Re-sync" if full_resync else "Shopify Live Sync",
+                                    0, user["email"], {"source": "live", "full_resync": full_resync})
+    jobs_mod.launch(jobs_mod.run_sync_job(job["id"], "live", full_resync, 0, 0))
+    return {"job_id": job["id"], "status": "queued", "source": "live", "mock": shopify_client.mock_mode}
 
 
 @api.post("/reanalyze")
 async def trigger_reanalyze(user: dict = Depends(require_permission("edit"))):
     job = await jobs_mod.create_job("SEO Reanalysis", 0, user["email"])
-    jobs_mod.launch(jobs_mod.run_reanalysis_job(job["id"]))
+    jobs_mod.launch(jobs_mod.run_reanalysis_job(job["id"], shopify_client.data_source))
     return {"job_id": job["id"], "status": "queued"}
 
 
 @api.get("/sync/status")
 async def sync_status(user: dict = Depends(get_current_user)):
-    state = await db.sync_state.find_one({"id": "sync"}, {"_id": 0})
+    source = shopify_client.data_source
+    state = await db.sync_state.find_one({"id": source}, {"_id": 0})
     active = await db.jobs.find_one({"status": {"$in": ["queued", "running"]}}, {"_id": 0},
                                     sort=[("created_at", -1)])
-    return {"sync_state": state, "active_job": active, "data_source": _source(),
-            "connected": shopify_client.is_connected}
+    return {"sync_state": state, "active_job": active, "data_source": source,
+            "mode": shopify_client.mode, "connected": shopify_client.is_connected}
 
 
 @api.get("/jobs")
@@ -416,18 +440,23 @@ async def list_audit(user: dict = Depends(get_current_user), page: int = 1, page
 @api.get("/settings")
 async def get_settings(user: dict = Depends(get_current_user)):
     rules = await get_rules()
-    state = await db.sync_state.find_one({"id": "sync"}, {"_id": 0})
-    import os
+    source = shopify_client.data_source
+    state = await db.sync_state.find_one({"id": source}, {"_id": 0})
     return {
         "rules": rules,
+        "mode": shopify_client.mode,
         "shopify": {
+            "mode": shopify_client.mode,
+            "mock_mode": shopify_client.mock_mode,
             "connected": shopify_client.is_connected,
             "store_domain": shopify_client.domain or None,
             "api_version": shopify_client.api_version,
-            "data_source": _source(),
+            "data_source": source,
             "last_sync": state.get("last_sync") if state else None,
+            "counts": state.get("counts") if state else None,
+            "test_product_id": os.environ.get("SHOPIFY_TEST_PRODUCT_ID") or None,
+            "test_product_handle": os.environ.get("SHOPIFY_TEST_PRODUCT_HANDLE") or None,
         },
-        "demo_mode": os.environ.get("DEMO_MODE", "false").lower() == "true",
     }
 
 
@@ -443,6 +472,99 @@ async def update_settings(payload: dict = Body(...), user: dict = Depends(requir
 @api.get("/settings/shopify/test")
 async def test_shopify(user: dict = Depends(require_permission("settings"))):
     return await shopify_client.test_connection()
+
+
+@api.get("/settings/shopify/test-product")
+async def get_test_product(user: dict = Depends(require_permission("settings"))):
+    return {"id": os.environ.get("SHOPIFY_TEST_PRODUCT_ID") or None,
+            "handle": os.environ.get("SHOPIFY_TEST_PRODUCT_HANDLE") or None}
+
+
+@api.post("/shopify/verify-publish")
+async def verify_publish(user: dict = Depends(require_permission("publish"))):
+    """Real SEO publish round-trip verification on a single low-risk test product.
+    Runs against the mock store in mock mode; refuses a real mutation unless explicitly enabled."""
+    if shopify_client.use_real and os.environ.get("SHOPIFY_ALLOW_LIVE_PUBLISH", "false").lower() != "true":
+        return {"skipped": True, "reason": "Real Shopify credentials detected; live mutation is intentionally disabled. "
+                                           "Set SHOPIFY_ALLOW_LIVE_PUBLISH=true to enable the real round-trip."}
+    if not shopify_client.mock_mode and shopify_client.mode != "live":
+        raise HTTPException(status_code=400, detail="Set APP_DATA_MODE=live (or enable SHOPIFY_MOCK_MODE) to run the publish round-trip test")
+    tid = os.environ.get("SHOPIFY_TEST_PRODUCT_ID")
+    th = os.environ.get("SHOPIFY_TEST_PRODUCT_HANDLE")
+    if tid:
+        p = await db.products.find_one({"shopify_product_id": tid})
+    elif th:
+        p = await db.products.find_one({"handle": th, "data_source": "live"})
+    else:
+        p = await db.products.find_one({"data_source": "live"})
+    if not p:
+        raise HTTPException(status_code=404, detail="No live product available. Run a live sync first.")
+    prev_t, prev_d = p.get("current_seo_title"), p.get("current_seo_description")
+    new_t = (prev_t or (p.get("title") or "Test SEO Title"))[:60]
+    new_d = (prev_d or "Verification meta description for the SEO publish round-trip on a low-risk product today.")[:160]
+    result = await shopify_client.publish_product_seo(p["shopify_product_id"], new_t, new_d)
+    verify = await shopify_client.get_product_seo(p["shopify_product_id"])
+    await db.products.update_one({"id": p["id"]}, {"$set": {
+        "current_seo_title": new_t, "current_seo_description": new_d,
+        "last_synced_seo_title": new_t, "last_synced_seo_description": new_d,
+        "publication_status": "verified"}})
+    audit_id = f"AUD-{uuid.uuid4().hex[:8].upper()}"
+    await db.audit_log.insert_one({
+        "id": audit_id, "user": user["email"], "timestamp": now_iso(),
+        "resource_type": "product", "resource_id": p["id"], "resource_title": p.get("title"),
+        "changes": [{"field": "seo_title", "old": prev_t, "new": new_t},
+                    {"field": "meta_description", "old": prev_d, "new": new_d}],
+        "source": "VerifyTest", "result": "verified", "job_id": None, "reverted": False,
+    })
+    updated = await reanalyze_one_product(p["id"])
+    verified_match = bool(verify) and verify.get("title") == new_t and verify.get("description") == new_d
+    return {"product_id": p["id"], "shopify_product_id": p["shopify_product_id"],
+            "published": result, "verified_shopify_value": verify, "verified_match": verified_match,
+            "new_bucket": updated["status_bucket"], "new_score": updated["seo_score"],
+            "audit_id": audit_id, "mock": shopify_client.mock_mode}
+
+
+@api.post("/diagnostics/loadtest")
+async def loadtest(count: int = 35000, user: dict = Depends(require_permission("settings"))):
+    """Generate ~N synthetic loadtest records (separate data_source) and measure query perf."""
+    import time
+    count = min(max(count, 1000), 60000)
+    existing = await db.products.count_documents({"data_source": "loadtest"})
+    generated = 0
+    if existing < count:
+        batch = []
+        for doc in seed.generate_loadtest(count - existing):
+            batch.append(doc)
+            if len(batch) >= 5000:
+                await db.products.insert_many(batch); generated += len(batch); batch = []
+        if batch:
+            await db.products.insert_many(batch); generated += len(batch)
+
+    def ms(t):
+        return round(t * 1000, 1)
+    m = {}
+    t = time.perf_counter(); total = await db.products.count_documents({"data_source": "loadtest"}); m["count_documents_ms"] = ms(time.perf_counter() - t)
+    t = time.perf_counter(); await db.products.find({"data_source": "loadtest"}, {"_id": 0}).sort("seo_score", 1).skip(10000).limit(50).to_list(50); m["paginated_deep_page_ms"] = ms(time.perf_counter() - t)
+    t = time.perf_counter(); await db.products.count_documents({"data_source": "loadtest", "status_bucket": "missing"}); m["filter_bucket_count_ms"] = ms(time.perf_counter() - t)
+    t = time.perf_counter(); await db.products.find({"data_source": "loadtest", "issue_codes": "MISSING_SEO_TITLE"}, {"_id": 0}).limit(50).to_list(50); m["issue_queue_find_ms"] = ms(time.perf_counter() - t)
+    t = time.perf_counter(); await db.products.find({"data_source": "loadtest", "title": {"$regex": "iPhone 17", "$options": "i"}}, {"_id": 0}).limit(50).to_list(50); m["search_regex_ms"] = ms(time.perf_counter() - t)
+    t = time.perf_counter()
+    await db.products.aggregate([{"$match": {"data_source": "loadtest"}}, {"$group": {"_id": None, "avg": {"$avg": "$seo_score"}}}]).to_list(1)
+    for b in BUCKETS:
+        await db.products.count_documents({"data_source": "loadtest", "status_bucket": b})
+    m["dashboard_aggregation_ms"] = ms(time.perf_counter() - t)
+    t = time.perf_counter()
+    await db.products.aggregate([{"$match": {"data_source": "loadtest", "current_seo_title": {"$ne": None}}},
+                                 {"$group": {"_id": "$current_seo_title", "n": {"$sum": 1}}},
+                                 {"$match": {"n": {"$gt": 1}}}, {"$limit": 100}]).to_list(100)
+    m["duplicate_title_aggregation_ms"] = ms(time.perf_counter() - t)
+    return {"loadtest_records": total, "generated_now": generated, "metrics_ms": m}
+
+
+@api.delete("/diagnostics/loadtest")
+async def clear_loadtest(user: dict = Depends(require_permission("settings"))):
+    r = await db.products.delete_many({"data_source": "loadtest"})
+    return {"deleted": r.deleted_count}
 
 
 @api.get("/diagnostics")

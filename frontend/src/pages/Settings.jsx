@@ -33,11 +33,22 @@ export default function Settings() {
   };
   const testShopify = async () => {
     setTesting(true);
-    try { const { data } = await api.get("/settings/shopify/test"); toast[data.connected ? "success" : "error"](data.message || (data.connected ? "Connected" : "Not connected")); }
-    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    try {
+      const { data } = await api.get("/settings/shopify/test");
+      let msg = data.message || (data.connected ? "Connected" : "Not connected");
+      if (data.missing_scopes && data.missing_scopes.length) msg += ` Missing scopes: ${data.missing_scopes.join(", ")}`;
+      toast[data.connected ? "success" : "error"](msg);
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     finally { setTesting(false); }
   };
   const reanalyze = async () => { try { await api.post("/reanalyze"); toast.success("Reanalysis job started"); } catch { toast.error("Failed"); } };
+  const liveSync = async (full) => { try { await api.post(`/shopify/live-sync?full_resync=${full}`); toast.success(full ? "Full re-sync started" : "Live sync started"); } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); } };
+  const verifyPublish = async () => {
+    try { const { data } = await api.post("/shopify/verify-publish");
+      if (data.skipped) toast.info(data.reason);
+      else toast.success(`Publish round-trip verified${data.mock ? " (mock)" : ""}: ${data.verified_match ? "value matches Shopify" : "mismatch"}`);
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
 
   if (!settings || !rules) return <div className="text-muted-foreground">Loading settings…</div>;
 
@@ -49,14 +60,18 @@ export default function Settings() {
       <div className="rounded-xl border border-border bg-card p-5">
         <h2 className="mb-4 flex items-center gap-2 font-heading text-lg font-semibold"><ShieldCheck className="h-5 w-5 text-primary" /> Shopify Connection</h2>
         <div className="space-y-2">
-          <Row label="Status" ok={settings.shopify.connected} value={settings.shopify.connected ? "Connected" : "Not connected (demo data)"} />
+          <Row label="Active mode" value={<span className="font-mono uppercase">{settings.shopify.mode}{settings.shopify.mock_mode && settings.shopify.mode === "live" ? " · mock" : ""}</span>} />
+          <Row label="Status" ok={settings.shopify.connected} value={settings.shopify.connected ? (settings.shopify.mock_mode ? "Connected (mock)" : "Connected") : "Not connected (demo data)"} />
           <Row label="Store domain" value={settings.shopify.store_domain || "—"} />
           <Row label="API version" value={settings.shopify.api_version} />
           <Row label="Data source" value={<span className="font-mono uppercase">{settings.shopify.data_source}</span>} />
           <Row label="Last sync" value={settings.shopify.last_sync ? new Date(settings.shopify.last_sync).toLocaleString() : "Never"} />
+          {settings.shopify.counts && (
+            <Row label="Last sync results" value={<span className="font-mono text-xs">{settings.shopify.counts.new}+ new · {settings.shopify.counts.updated} upd · {settings.shopify.counts.unchanged} same · {settings.shopify.counts.deleted} del · {settings.shopify.counts.failed} fail</span>} />
+          )}
         </div>
         {can("settings") && (
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex flex-wrap gap-2">
             <button data-testid="settings-test-shopify-btn" onClick={testShopify} disabled={testing}
               className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm hover:bg-accent">
               {testing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Test Shopify Connection
@@ -64,9 +79,22 @@ export default function Settings() {
             <button onClick={reanalyze} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm hover:bg-accent">
               <RefreshCw className="h-4 w-4" /> Re-run SEO Analysis
             </button>
+            {settings.shopify.mode === "live" && (
+              <>
+                <button data-testid="settings-full-resync-btn" onClick={() => liveSync(true)}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm hover:bg-accent">
+                  <RefreshCw className="h-4 w-4" /> Full Re-sync
+                </button>
+                <button data-testid="settings-verify-publish-btn" onClick={verifyPublish}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm hover:bg-accent">
+                  <ShieldCheck className="h-4 w-4" /> Verify Publish Round-trip
+                </button>
+              </>
+            )}
           </div>
         )}
-        {settings.demo_mode && <div className="mt-3 flex items-center gap-2 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-500"><Lock className="h-3.5 w-3.5" /> DEMO_MODE is ON. Seeded demo data is used and never published to a real store. Disable in production.</div>}
+        {settings.shopify.mode === "demo" && <div className="mt-3 flex items-center gap-2 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-500"><Lock className="h-3.5 w-3.5" /> DEMO mode active. Seeded data is used and never published to a real store. Set APP_DATA_MODE=live to connect Shopify.</div>}
+        {settings.shopify.mode === "live" && settings.shopify.mock_mode && <div className="mt-3 flex items-center gap-2 rounded-md bg-sky-500/10 px-3 py-2 text-xs text-sky-400"><ShieldCheck className="h-3.5 w-3.5" /> LIVE mode using a MOCK Shopify store (no real credentials). Set SHOPIFY_MOCK_MODE=false with real credentials to go live.</div>}
       </div>
 
       <div className="rounded-xl border border-border bg-card p-5">

@@ -182,4 +182,48 @@ def generate_collections(count: int):
 
 
 def demo_enabled() -> bool:
-    return os.environ.get("DEMO_MODE", "false").lower() == "true"
+    return os.environ.get("APP_DATA_MODE", "demo").strip().lower() == "demo"
+
+
+def generate_loadtest(count: int):
+    """Lightweight synthetic LIVE-shaped records (data_source='loadtest') for perf testing.
+
+    Precomputed buckets/scores/issues so query performance is measured without
+    running the analyzer. Includes intentional duplicates for dedup benchmarking.
+    """
+    rnd = random.Random(7)
+    buckets = ["missing", "critical", "needs_improvement", "good", "optimised"]
+    issue_sets = [["MISSING_SEO_TITLE"], ["MISSING_META_DESCRIPTION"],
+                  ["TITLE_ABOVE_RANGE"], ["META_ABOVE_RANGE"],
+                  ["DUPLICATE_TITLE", "DUPLICATE_META"], [], ["KEYWORD_STUFFING"]]
+    dup_title = f"Phone Case | {BRAND} Australia Free Shipping"
+    dup_meta = "Shop premium phone cases at UrbanDotted Australia with fast free shipping today."
+    for i in range(count):
+        d = DEVICES[i % len(DEVICES)]
+        c = CASE_TYPES[i % len(CASE_TYPES)]
+        col = COLORS[i % len(COLORS)]
+        b = buckets[i % len(buckets)]
+        issues = issue_sets[i % len(issue_sets)]
+        title = f"{BRAND} {d} {c} - {col} #{i}"
+        if "DUPLICATE_TITLE" in issues:
+            st, sd = dup_title, dup_meta
+        elif b == "missing":
+            st, sd = (None, None) if i % 2 else (f"{d} {c} | {BRAND}", None)
+        else:
+            st = f"{d} {c} in {col} | {BRAND} AU #{i % 500}"
+            sd = f"Shop the {BRAND} {d} {c.lower()} in {col.lower()} with fast free shipping. #{i % 500}"
+        score = {"missing": 25, "critical": 45, "needs_improvement": 62,
+                 "good": 80, "optimised": 95}[b] + rnd.randint(-4, 4)
+        yield {
+            "id": str(uuid.uuid4()),
+            "shopify_product_id": f"gid://shopify/Product/LT{i}",
+            "handle": f"lt-{d.split()[0].lower()}-{i}",
+            "title": title, "product_type": "Phone Case", "vendor": BRAND,
+            "tags": [d.split()[0], col], "status": "active",
+            "price": None, "inventory": None, "sku": None,
+            "current_seo_title": st, "current_seo_description": sd,
+            "draft_seo_title": None, "draft_seo_description": None, "has_draft": False,
+            "images": [], "ai_quality": None, "seo_score": max(0, min(100, score)),
+            "score_breakdown": {}, "issue_codes": issues, "status_bucket": b,
+            "publication_status": "published", "data_source": "loadtest", "shopify_state": "active",
+        }

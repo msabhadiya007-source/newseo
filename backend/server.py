@@ -74,8 +74,9 @@ async def startup():
     await db.audit_log.create_index("timestamp")
     if not await db.settings.find_one({"id": "seo_rules"}):
         await db.settings.insert_one({"id": "seo_rules", **DEFAULT_RULES})
-    logger.info("Startup complete. Data source: %s",
-                "shopify" if os.environ.get("SHOPIFY_ADMIN_ACCESS_TOKEN") else "demo")
+    from shopify_client import shopify_client
+    logger.info("Startup complete. Mode: %s | data_source: %s | mock: %s",
+                shopify_client.mode, shopify_client.data_source, shopify_client.mock_mode)
 
 
 @app.on_event("shutdown")
