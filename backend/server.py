@@ -6,6 +6,7 @@ from starlette.middleware.cors import CORSMiddleware
 from db import db, client
 from auth import router as auth_router, seed_admin
 from routes import api
+from bulk_routes import api2
 from seo import DEFAULT_RULES
 
 logging.basicConfig(level=logging.INFO,
@@ -34,6 +35,7 @@ async def ready():
 
 app.include_router(auth_router)
 app.include_router(api)
+app.include_router(api2)
 
 _origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
 _frontend = os.environ.get("FRONTEND_URL")
@@ -72,8 +74,37 @@ async def startup():
     await db.jobs.create_index("id", unique=True)
     await db.audit_log.create_index("resource_id")
     await db.audit_log.create_index("timestamp")
+    # ---- Phase 4/5 collections + indexes ----
+    await db.products.create_index("has_draft")
+    await db.products.create_index("publication_status")
+    await db.products.create_index("draft_source")
+    await db.products.create_index("seo_title_hash")
+    await db.products.create_index("meta_hash")
+    await db.products.create_index("shopify_updated_at")
+    await db.publish_jobs.create_index("id", unique=True)
+    await db.publish_jobs.create_index("created_at")
+    await db.publish_jobs.create_index("idempotency_key")
+    await db.publish_items.create_index("id", unique=True)
+    await db.publish_items.create_index([("job_id", 1), ("status", 1)])
+    await db.publish_items.create_index("resource_id")
+    await db.csv_jobs.create_index("id", unique=True)
+    await db.csv_jobs.create_index("created_at")
+    await db.csv_rows.create_index([("csv_job_id", 1), ("severity", 1)])
+    # locks: _id is the lock key (unique by default); TTL cleanup on expiry field
+    try:
+        await db.locks.create_index("expires_at", expireAfterSeconds=0)
+    except Exception:  # noqa
+        pass
+    await db.audit_log.create_index("job_id")
+    await db.audit_log.create_index("correlation_id")
     if not await db.settings.find_one({"id": "seo_rules"}):
         await db.settings.insert_one({"id": "seo_rules", **DEFAULT_RULES})
+    # crash recovery: resume any in-flight bulk jobs (MongoDB is authoritative)
+    try:
+        import bulk_jobs
+        await bulk_jobs.recover_jobs_on_startup()
+    except Exception:  # noqa
+        logger.exception("Job recovery on startup failed")
     from shopify_client import shopify_client
     logger.info("Startup complete. Mode: %s | data_source: %s | mock: %s",
                 shopify_client.mode, shopify_client.data_source, shopify_client.mock_mode)

@@ -203,7 +203,11 @@ async def save_product_draft(product_id: str, payload: dict = Body(...),
     p = await db.products.find_one({"id": product_id})
     if not p:
         raise HTTPException(status_code=404, detail="Product not found")
-    update = {"has_draft": True, "publication_status": "draft"}
+    update = {"has_draft": True, "publication_status": "draft",
+              "draft_source": "manual", "draft_updated_at": now_iso(), "conflict_resolved": False}
+    if not p.get("has_draft"):
+        update["draft_base_title"] = p.get("current_seo_title")
+        update["draft_base_description"] = p.get("current_seo_description")
     if "seo_title" in payload:
         update["draft_seo_title"] = payload["seo_title"]
     if "meta_description" in payload:
@@ -244,7 +248,10 @@ async def publish_product(product_id: str, payload: dict = Body(...),
 
     await db.products.update_one({"id": product_id}, {"$set": {
         "current_seo_title": new_title, "current_seo_description": new_meta,
+        "last_synced_seo_title": new_title, "last_synced_seo_description": new_meta,
         "draft_seo_title": None, "draft_seo_description": None, "has_draft": False,
+        "draft_base_title": None, "draft_base_description": None, "conflict_resolved": False,
+        "seo_conflict": False,
         "publication_status": "verified", "shopify_updated_at": now_iso(),
     }})
 

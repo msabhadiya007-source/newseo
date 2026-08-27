@@ -41,8 +41,15 @@ Production-ready, SEO-ONLY Shopify management platform for a store with ~35,000+
 - **P3:** login_attempts TTL index; saved filters; multi-user management UI.
 
 ## Next Tasks
-1. Bulk spreadsheet editor + CSV import/export with validation preview.
-2. Image ALT module + bulk AI generation jobs.
+1. Phase 6: AI bulk generation (source hooks already in place: manual|bulk|csv|ai|rollback|retry).
+2. Phase 7: Image ALT Studio.
+
+## Phase 4 + 5 — Bulk Editor + CSV + Production Safety (COMPLETE & VERIFIED)
+- Backend modules: bulk_common (validation/severity READY|WARNING|ERROR, normalized SEO hashes, lease locks, conflict detection, transient/permanent retry classification), bulk_jobs (chunked bulk publish + bulk rollback workers, verify→reanalyze→audit, retry w/ backoff, crash recovery + reconcile), csv_service (strict SEO-only parse/validate, forbidden-column rejection), bulk_routes (/api/bulk/* + /api/csv/*).
+- Safety: per-resource lease locks (mutual exclusion), idempotency keys (double-submit dedupe), stale-data conflict BLOCKS publish (+resolve keep_shopify/keep_draft), ROLLBACK_CONFLICT detection, MongoDB-authoritative job recovery on startup + manual /bulk/recover, audit hardening (actor_role, job_id, csv_import_id, correlation_id, conflict_state, retry_count).
+- Frontend: Bulk Editor (spreadsheet, page vs all-filtered selection banner, live counters, validate, publish-preview w/ >100 confirmation + warning ack, conflict resolution modal, bulk jobs w/ rollback/retry/cancel + per-record drill-down, unsaved-changes guard) and CSV (background export + secure token download + regenerate-on-miss, import forbidden-column rejection + Ready/Warnings/Errors preview + drafts-only confirm).
+- Verified: pytest 132 passed / 23 skipped (stable), incl. 40 new tests (idempotency, lock mutual-exclusion, conflict blocking, rollback + ROLLBACK_CONFLICT, crash recovery no-duplicate, retry classification, permissions viewer-denied, CSV forbidden/valid/invalid/duplicate/empty/download-token, SEO-only regression across bulk+csv). Frontend UI all green. 35k load test sub-65ms with new indexes. No new dependencies.
+- Limitation: CSV export files are temporary artifacts (regenerated from persisted job params if missing); production should use S3/GCS object storage. Collection publish verify relies on mutation echo (mock has no collection read-back).
 
 ## Phase 3.5 — Real Shopify Live Sync (COMPLETE & VERIFIED, this session)
 - Real Shopify Admin GraphQL ingestion in jobs.ingest_live (cursor pagination, incremental via updatedAt, non-destructive merge preserving local drafts + conflict flagging, deleted-record marking on full re-sync). Mock transport (SHOPIFY_MOCK_MODE=true) exercises the real code path without live credentials.
