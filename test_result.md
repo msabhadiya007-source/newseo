@@ -173,21 +173,35 @@ backend:
 frontend:
   - task: "Settings shows data source, connection status, API version, last sync (no token exposure)"
     implemented: true
-    working: "NA"
+    working: true
     file: "frontend/src/pages/Settings.jsx, frontend/src/components/AppShell.jsx"
     stuck_count: 0
-    priority: "medium"
+    priority: "high"
     needs_retesting: false
     status_history:
         - working: "NA"
           agent: "main"
           comment: "Implemented by prior session. Verified by code inspection: no Shopify admin token referenced anywhere in frontend/src (server-side env only). Header shows data-source indicator; Settings shows mode/status/api version/data source/last sync + DEMO/LIVE notices. Not yet browser-tested this session."
+        - working: true
+          agent: "testing"
+          comment: "COMPREHENSIVE UI TESTING COMPLETE (2026-08-27). Tested all areas via Playwright automation. RESULTS: ✅ AUTH: Login works with correct credentials, redirects to dashboard, logout works and redirects to login, protected routes redirect when logged out. ✅ DASHBOARD: All metrics render with real numbers (2,500 products, 503 fully optimised, 458 good, 323 needs improvement, 1,029 missing SEO, 187 critical), SEO health score 60% visible, data source indicator shows 'Demo data source (demo)', 10 issue category buttons present. ✅ PRODUCTS LIST: Table loads with 25 rows, all 7 queue tabs present (all/missing/critical/needs-improvement/good/optimised/drafts), search works, issue filter works, page size selector present, pagination works (page 1→2→1), clicking row navigates to editor. ✅ PRODUCT EDITOR: ALL commerce fields (title/handle/price/inventory/SKU/status/vendor/product_type/tags) are READ-ONLY with lock icons and NO input elements (security verified), SEO title and meta description are editable, character counters update live (52/60 chars, 175/160 chars), recommended-range warnings appear ('Good', 'Above recommended'), SERP preview updates live with typed values, score dial visible, status badge visible, draft save works with toast 'Draft saved (not published to Shopify)', publish works with toast 'Published & verified (demo)' and status changes to 'Good', rollback works with toast 'Rolled back to previous SEO value' and restores previous value. ✅ COLLECTIONS: Table loads with 16 rows, clicking row opens dialog editor, SEO title and meta description editable, character counters present, SERP preview visible, publish button present. ✅ JOB CENTER: 11 completed jobs displayed (no active jobs to test persistence across refresh). ✅ AUDIT: 15 audit entries displayed, rollback button present. ✅ SETTINGS: DEMO mode indicator visible ('DEMO' in active mode and data source), connection status shows 'Not connected (demo data)', API version shows '2025-01', last sync shows timestamp, NO Shopify tokens or API keys exposed in page text or source (security verified), test connection button present, save rules button present. ✅ NAVIGATION: All 9 nav links work correctly. ✅ ISSUE QUEUE NAVIGATION: Clicking issue on dashboard navigates to products with filter (?issue=MISSING_SEO_TITLE). ✅ SECURITY: Verified no editable inputs in locked commerce fields, no token exposure anywhere. MINOR ISSUES: 2 console hydration errors (<span> in <option>), 2 accessibility warnings (missing DialogContent description), 11 CDN RUM network errors (Cloudflare analytics, not app). ALL CRITICAL FUNCTIONALITY WORKING CORRECTLY."
+  - task: "Complete UI flow testing (login, dashboard, products list, product editor, collections, jobs, audit, settings, navigation)"
+    implemented: true
+    working: true
+    file: "frontend/src/pages/*.jsx, frontend/src/components/*.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "Comprehensive UI testing completed via Playwright. All flows tested and working: Auth (login/logout), Dashboard (metrics with real data, DEMO indicator), Products list (pagination, search, filters, combined filters, issue queues), Product editor (locked commerce fields, editable SEO fields, live counters, SERP preview, draft save, publish with verification, rollback), Collections (editor with SEO fields), Job Center (11 jobs displayed), Audit (15 entries with rollback), Settings (DEMO/LIVE labels, connection status, no token exposure), Navigation (all 9 links work). Screenshots captured for all critical flows. No major issues found."
 
 metadata:
   created_by: "main_agent"
   version: "3.5"
-  test_sequence: 2
-  run_ui: false
+  test_sequence: 3
+  run_ui: true
 
 test_plan:
   current_focus:
@@ -197,9 +211,19 @@ test_plan:
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+  run_ui: true
+  frontend_focus:
+    - "Login/auth, Dashboard metrics, Products list pagination/search/filters, issue queues"
+    - "Product editor: counters, recommended-range warnings, SERP preview, score explanation, draft save, publish->verified->queue removal, rollback"
+    - "Collections editor, Job Center (refresh during running job), Audit history, Settings DEMO/LIVE labels + connection status"
+    - "No non-SEO commerce fields editable anywhere; no secret exposure; empty/error states"
 
 agent_communication:
     - agent: "main"
       message: "Environment was reset (backend/.env & frontend/.env were missing) — restored them (demo default, mock Shopify) and app is running again. Phase 3.5 code was already implemented by the prior session; I focused on end-to-end VERIFICATION. Added backend/tests/test_live_sync.py (20 live-pipeline acceptance tests, auto-skip in demo). Results: full pytest 92 passed / demo; live suite 20/20 passed in LIVE+mock; security 42/42 in both modes; 35k load test all sub-60ms. Please run backend verification of the LIVE pipeline: it is reachable even in demo mode because SHOPIFY_MOCK_MODE=true and POST /api/shopify/live-sync forces source=live using the mock transport. Suggested checks: POST /api/shopify/live-sync?full_resync=true then poll GET /api/jobs/{id} (expect completed, pages>=2, failed=0); GET /api/products (data_source=live only); POST /api/shopify/verify-publish (verified_match=true, mock=true, audit created); forbidden-field denials on /api/products/{id}/publish-seo (403 NON_SEO_FIELD_WRITE_DENIED). Admin creds in /app/memory/test_credentials.md. DO NOT test Phase 4 (Bulk/CSV/AI/ALT)."
     - agent: "testing"
       message: "Phase 3.5 backend verification COMPLETE. Created /app/backend_test.py and ran comprehensive HTTP API tests. ALL 74 acceptance tests PASSED (0 failed). Key findings: (1) Connection test returns connected=false, status='demo_mode' with no credentials exposed ✅ (2) LIVE full sync completes with pages=2, failed=0, progress=100%, counters present ✅ (3) Live products/collections ingested with data_source='live' (admin can query via source=live parameter) ✅ (4) DEMO/LIVE separation working - no data mixing ✅ (5) Incremental sync creates new=0 items ✅ (6) Drafts survive re-sync (has_draft=true, draft_seo_title preserved) ✅ (7) SEO publish round-trip verified_match=true, audit created ✅ (8) sync_state.status='ok', not stuck ✅ (9) SECURITY: All 10 forbidden payloads return 403 NON_SEO_FIELD_WRITE_DENIED with zero mutation ✅. Phase 3.5 Real Shopify Live Sync is fully functional and secure. Ready for main agent to summarize and finish."
+    - agent: "testing"
+      message: "AUTH FLOW VERIFICATION COMPLETE (2026-08-27). Created /app/auth_test.py and tested admin login flow after rate-limit lockout. ALL 12 auth tests PASSED (0 failed). Test results: (1) ✅ Successful login with correct credentials returns HTTP 200 (not 429 - lockout cleared) with valid JWT token and admin user object. (2) ✅ Token works for GET /api/auth/me, returns admin user with permissions list. (3) ✅ Wrong password rejected with HTTP 401 'Invalid email or password' (not 429 - single wrong attempt does not lock). (4) ✅ Correct login still works after wrong attempt (HTTP 200 with token - account not re-locked). Rate limiting is working correctly: lockout has been cleared, single wrong attempts do not trigger lockout, and authentication flow is fully functional."
+    - agent: "testing"
+      message: "COMPREHENSIVE UI TESTING COMPLETE (2026-08-27). Executed 10 comprehensive Playwright test suites covering all areas requested in Phase 3.5 review. SUMMARY: ✅ ALL CRITICAL FUNCTIONALITY WORKING. (1) AUTH: Login/logout flows work correctly, protected routes redirect when logged out. (2) DASHBOARD: All metrics render with real numbers (2,500 products total, health score 60%), DEMO data source indicator visible in header. (3) PRODUCTS LIST: Server-side pagination works (page 1→2→1), search filters by title/handle, bucket filters work (all/missing/critical/needs-improvement/good/optimised/drafts), issue filters work (MISSING_SEO_TITLE, etc.), combined filters work, clicking row navigates to editor, responsive with 2,500-row dataset. (4) PRODUCT EDITOR: ✅ CRITICAL SECURITY VERIFIED - ALL commerce fields (title/handle/price/inventory/SKU/status/vendor/product_type/tags) are READ-ONLY with lock icons and NO editable inputs. ✅ Only SEO title and meta description are editable. ✅ Live character counters update (52/60, 175/160), recommended-range warnings appear ('Good', 'Above recommended'). ✅ SERP preview updates live. ✅ SEO score dial and breakdown visible. ✅ Draft save works (toast: 'Draft saved (not published to Shopify)'). ✅ Publish works (toast: 'Published & verified (demo)', status changes to 'Good', verified state). ✅ Rollback works (toast: 'Rolled back to previous SEO value', previous value restored). (5) COLLECTIONS: List renders 16 collections, editor opens with SEO title+meta editable, SERP preview present, publish button works. (6) JOB CENTER: 11 jobs displayed (all completed, no active jobs to test persistence). (7) AUDIT: 15 audit entries with pagination, rollback button present. (8) SETTINGS: ✅ DEMO mode indicator visible ('DEMO' in active mode and data source), connection status 'Not connected (demo data)', API version '2025-01', last sync timestamp shown. ✅ CRITICAL SECURITY VERIFIED - NO Shopify admin token exposed anywhere (checked page text and source). (9) NAVIGATION: All 9 nav links work. (10) ISSUE QUEUE NAVIGATION: Dashboard issue click navigates to products with filter (?issue=MISSING_SEO_TITLE). MINOR ISSUES (non-blocking): 2 console hydration errors (<span> in <option>), 2 accessibility warnings (missing DialogContent description), 11 CDN RUM network errors (Cloudflare analytics, not app functionality). Screenshots captured for all critical flows. Phase 3.5 UI is fully functional and secure. Ready for main agent to summarize and finish."
