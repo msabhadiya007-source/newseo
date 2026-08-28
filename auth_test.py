@@ -8,7 +8,7 @@ import json
 import sys
 
 # Configuration
-BASE_URL = "https://78b67b39-50ae-49cf-b798-c140da02eb02.preview.emergentagent.com/api"
+BASE_URL = "https://admin-demo-cleanup.preview.emergentagent.com/api"
 ADMIN_EMAIL = "msabhadiya007@gmail.com"
 ADMIN_PASSWORD = "Admin@12345"
 
