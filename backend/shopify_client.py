@@ -107,6 +107,15 @@ class ShopifyClient:
             return False
         return self.mock_mode or bool(self.domain and self.token)
 
+    @property
+    def config_error(self):
+        """LIVE mode with missing real credentials must NOT silently fall back to demo."""
+        if self.mode == "live" and not self.mock_mode and not (self.domain and self.token):
+            return ("APP_DATA_MODE=live but SHOPIFY_STORE_DOMAIN / SHOPIFY_ADMIN_ACCESS_TOKEN "
+                    "are not configured. Set them (and SHOPIFY_MOCK_MODE=false) server-side; "
+                    "the app will not fall back to DEMO automatically.")
+        return None
+
     def endpoint(self) -> str:
         return f"https://{self.domain}/admin/api/{self.api_version}/graphql.json"
 

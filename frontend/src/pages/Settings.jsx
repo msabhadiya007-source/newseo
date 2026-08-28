@@ -23,9 +23,27 @@ export default function Settings() {
   const [diag, setDiag] = useState(null);
   const [rules, setRules] = useState(null);
   const [testing, setTesting] = useState(false);
+  const [demoInfo, setDemoInfo] = useState(null);
+  const [confirmClean, setConfirmClean] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
 
   const load = () => api.get("/settings").then(({ data }) => { setSettings(data); setRules(data.rules); });
   useEffect(() => { load(); api.get("/diagnostics").then(({ data }) => setDiag(data)); }, []);
+
+  const openCleanup = async () => {
+    try { const { data } = await api.get("/settings/demo-data"); setDemoInfo(data); setConfirmClean(true); }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+  const removeDemoData = async () => {
+    setCleaning(true);
+    try {
+      const { data } = await api.delete("/settings/demo-data");
+      const d = data.deleted;
+      toast.success(`Removed ${d.products} demo products, ${d.collections} collections, ${d.audit} audit & ${d.publish_jobs + d.csv_jobs + d.sync_jobs} demo jobs. LIVE preserved: ${data.live_products_preserved}.`);
+      setConfirmClean(false); load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setCleaning(false); }
+  };
 
   const save = async () => {
     try { await api.put("/settings", rules); toast.success("SEO rules saved. Run reanalysis to apply."); }
@@ -64,8 +82,11 @@ export default function Settings() {
           <Row label="Status" ok={settings.shopify.connected} value={settings.shopify.connected ? (settings.shopify.mock_mode ? "Connected (mock)" : "Connected") : "Not connected (demo data)"} />
           <Row label="Store domain" value={settings.shopify.store_domain || "—"} />
           <Row label="API version" value={settings.shopify.api_version} />
+          <Row label="Mock mode" ok={!settings.shopify.mock_mode} value={settings.shopify.mock_mode ? "On (simulated Shopify)" : "Off (real Shopify)"} />
           <Row label="Data source" value={<span className="font-mono uppercase">{settings.shopify.data_source}</span>} />
+          <Row label="Last successful connection" value={settings.shopify.last_connection ? new Date(settings.shopify.last_connection).toLocaleString() : "Never"} />
           <Row label="Last sync" value={settings.shopify.last_sync ? new Date(settings.shopify.last_sync).toLocaleString() : "Never"} />
+          <Row label="Demo Data Present" ok={!settings.demo_data_present} value={settings.demo_data_present ? "Yes" : "No"} />
           {settings.shopify.counts && (
             <Row label="Last sync results" value={<span className="font-mono text-xs">{settings.shopify.counts.new}+ new · {settings.shopify.counts.updated} upd · {settings.shopify.counts.unchanged} same · {settings.shopify.counts.deleted} del · {settings.shopify.counts.failed} fail</span>} />
           )}
@@ -93,9 +114,46 @@ export default function Settings() {
             )}
           </div>
         )}
+        {settings.shopify.config_error && <div data-testid="config-error" className="mt-3 flex items-center gap-2 rounded-md bg-rose-500/10 px-3 py-2 text-xs text-rose-400"><XCircle className="h-3.5 w-3.5" /> {settings.shopify.config_error}</div>}
         {settings.shopify.mode === "demo" && <div className="mt-3 flex items-center gap-2 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-500"><Lock className="h-3.5 w-3.5" /> DEMO mode active. Seeded data is used and never published to a real store. Set APP_DATA_MODE=live to connect Shopify.</div>}
         {settings.shopify.mode === "live" && settings.shopify.mock_mode && <div className="mt-3 flex items-center gap-2 rounded-md bg-sky-500/10 px-3 py-2 text-xs text-sky-400"><ShieldCheck className="h-3.5 w-3.5" /> LIVE mode using a MOCK Shopify store (no real credentials). Set SHOPIFY_MOCK_MODE=false with real credentials to go live.</div>}
+
+        {/* Data Source — Remove Demo Data (admin) */}
+        {can("settings") && settings.demo_data_present && (
+          <div className="mt-4 rounded-md border border-border p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium">Remove Demo Data</div>
+                <div className="text-xs text-muted-foreground">Permanently deletes only DEMO-tagged records (never LIVE data, users or settings).</div>
+              </div>
+              <button data-testid="remove-demo-data-btn" onClick={openCleanup}
+                className="inline-flex items-center gap-1.5 rounded-md border border-rose-600/50 bg-rose-600/10 px-3 py-2 text-sm text-rose-400 hover:bg-rose-600/20">
+                <XCircle className="h-4 w-4" /> Remove Demo Data
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {confirmClean && demoInfo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setConfirmClean(false)}>
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-heading text-lg font-semibold text-rose-400">Remove Demo Data</h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              This will permanently remove <b>{demoInfo.counts.products.toLocaleString()} DEMO products</b>, <b>{demoInfo.counts.collections} demo collections</b> and related demo-only
+              drafts ({demoInfo.counts.drafts}), audit records ({demoInfo.counts.audit}) and jobs ({demoInfo.counts.publish_jobs + demoInfo.counts.csv_jobs + demoInfo.counts.sync_jobs}).
+              LIVE Shopify data, users and settings are preserved.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setConfirmClean(false)} className="rounded-md border border-border px-3 py-2 text-sm">Cancel</button>
+              <button data-testid="confirm-remove-demo" onClick={removeDemoData} disabled={cleaning}
+                className="inline-flex items-center gap-1.5 rounded-md bg-rose-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
+                {cleaning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />} Permanently remove {demoInfo.counts.products.toLocaleString()} demo products
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-xl border border-border bg-card p-5">
         <h2 className="mb-4 flex items-center gap-2 font-heading text-lg font-semibold"><SettingsIcon className="h-5 w-5 text-primary" /> SEO Rules</h2>

@@ -449,6 +449,8 @@ async def get_settings(user: dict = Depends(get_current_user)):
     rules = await get_rules()
     source = shopify_client.data_source
     state = await db.sync_state.find_one({"id": source}, {"_id": 0})
+    conn = await db.app_state.find_one({"id": "shopify_conn"}, {"_id": 0})
+    demo_products = await db.products.count_documents({"data_source": "demo"})
     return {
         "rules": rules,
         "mode": shopify_client.mode,
@@ -460,11 +462,62 @@ async def get_settings(user: dict = Depends(get_current_user)):
             "api_version": shopify_client.api_version,
             "data_source": source,
             "last_sync": state.get("last_sync") if state else None,
+            "last_connection": conn.get("last_connection") if conn else None,
+            "config_error": shopify_client.config_error,
             "counts": state.get("counts") if state else None,
             "test_product_id": os.environ.get("SHOPIFY_TEST_PRODUCT_ID") or None,
             "test_product_handle": os.environ.get("SHOPIFY_TEST_PRODUCT_HANDLE") or None,
         },
+        "demo_data_present": demo_products > 0,
     }
+
+
+async def _demo_counts():
+    """Counts of DEMO-tagged records only (identified by explicit data_source, never by name)."""
+    products = await db.products.count_documents({"data_source": "demo"})
+    collections = await db.collections_seo.count_documents({"data_source": "demo"})
+    drafts = await db.products.count_documents({"data_source": "demo", "has_draft": True})
+    demo_pids = [d["id"] async for d in db.products.find({"data_source": "demo"}, {"_id": 0, "id": 1})]
+    demo_cids = [d["id"] async for d in db.collections_seo.find({"data_source": "demo"}, {"_id": 0, "id": 1})]
+    demo_ids = set(demo_pids) | set(demo_cids)
+    audit = await db.audit_log.count_documents({"resource_id": {"$in": list(demo_ids)}}) if demo_ids else 0
+    publish_jobs = await db.publish_jobs.count_documents({"source": "demo"})
+    csv_jobs = await db.csv_jobs.count_documents({"data_source": "demo"})
+    sync_jobs = await db.jobs.count_documents({"meta.source": "demo"})
+    return {"products": products, "collections": collections, "drafts": drafts,
+            "audit": audit, "publish_jobs": publish_jobs, "csv_jobs": csv_jobs,
+            "sync_jobs": sync_jobs, "demo_ids": list(demo_ids)}
+
+
+@api.get("/settings/demo-data")
+async def demo_data_preview(user: dict = Depends(require_permission("settings"))):
+    c = await _demo_counts()
+    c.pop("demo_ids", None)
+    return {"present": c["products"] > 0 or c["collections"] > 0, "counts": c}
+
+
+@api.delete("/settings/demo-data")
+async def remove_demo_data(user: dict = Depends(require_permission("settings"))):
+    """Admin-only: delete ONLY DEMO-tagged records (data_source == 'demo').
+    LIVE and loadtest records, users and settings are never touched."""
+    c = await _demo_counts()
+    demo_ids = c["demo_ids"]
+    deleted = {}
+    deleted["products"] = (await db.products.delete_many({"data_source": "demo"})).deleted_count
+    deleted["collections"] = (await db.collections_seo.delete_many({"data_source": "demo"})).deleted_count
+    if demo_ids:
+        # remove audit + publish_items only for demo resources (preserve LIVE audit history)
+        deleted["audit"] = (await db.audit_log.delete_many({"resource_id": {"$in": demo_ids}})).deleted_count
+        await db.publish_items.delete_many({"resource_id": {"$in": demo_ids}})
+    else:
+        deleted["audit"] = 0
+    deleted["publish_jobs"] = (await db.publish_jobs.delete_many({"source": "demo"})).deleted_count
+    deleted["csv_jobs"] = (await db.csv_jobs.delete_many({"data_source": "demo"})).deleted_count
+    deleted["sync_jobs"] = (await db.jobs.delete_many({"meta.source": "demo"})).deleted_count
+    await db.sync_state.delete_one({"id": "demo"})
+    remaining_demo = await db.products.count_documents({"data_source": "demo"})
+    return {"ok": True, "deleted": deleted, "demo_data_present": remaining_demo > 0,
+            "live_products_preserved": await db.products.count_documents({"data_source": "live"})}
 
 
 @api.put("/settings")
@@ -478,7 +531,11 @@ async def update_settings(payload: dict = Body(...), user: dict = Depends(requir
 
 @api.get("/settings/shopify/test")
 async def test_shopify(user: dict = Depends(require_permission("settings"))):
-    return await shopify_client.test_connection()
+    result = await shopify_client.test_connection()
+    if result.get("connected"):
+        await db.app_state.update_one({"id": "shopify_conn"},
+                                      {"$set": {"id": "shopify_conn", "last_connection": now_iso()}}, upsert=True)
+    return result
 
 
 @api.get("/settings/shopify/test-product")
