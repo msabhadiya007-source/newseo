@@ -8,8 +8,6 @@
  */
 import { API } from "@/lib/api";
 
-let _bridgeReady = null;
-
 /** Public, non-secret config (client id / api key) served by the backend. */
 export async function getShopifyConfig() {
   const res = await fetch(`${API}/shopify/config`);
@@ -17,69 +15,38 @@ export async function getShopifyConfig() {
   return res.json(); // { api_key, app_configured, shop }
 }
 
-/** True when running inside an iframe (Shopify Admin embeds the app). */
+/** True when running inside Shopify Admin (embedded iframe or a host/embedded param). */
 export function isEmbedded() {
   try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("host") || params.get("embedded") === "1") return true;
     return window.top !== window.self;
   } catch {
+    // Cross-origin access to window.top throws only inside an iframe -> embedded.
     return true;
   }
 }
 
 /**
- * Load Shopify App Bridge exactly once, injecting the required api-key meta tag
- * BEFORE the script executes. Resolves with the global `window.shopify`.
+ * Resolve the global `window.shopify` provided by App Bridge.
+ *
+ * App Bridge v4 MUST be loaded from Shopify's CDN in the INITIAL <head> (non-async,
+ * with the shopify-api-key meta present first). That is done in public/index.html —
+ * it cannot be injected at runtime after hydration (Shopify aborts). Here we only
+ * WAIT for the global to become available. In a standalone (non-embedded) tab App
+ * Bridge is intentionally never loaded, so we fail fast and cleanly.
  */
 export async function ensureAppBridge() {
   if (window.shopify && typeof window.shopify.idToken === "function") return window.shopify;
-
-  // App Bridge only works when the app is embedded inside Shopify Admin. Loading the
-  // CDN script in a standalone browser tab makes App Bridge abort with a thrown error
-  // ("must be the first <script> tag ... Aborting"), so we never load it here. This
-  // check lives OUTSIDE the cached promise so it always fails fast (and cleanly).
   if (!isEmbedded()) {
     throw new Error("NOT_EMBEDDED");
   }
-
-  if (_bridgeReady) return _bridgeReady;
-
-  _bridgeReady = (async () => {
-    const cfg = await getShopifyConfig();
-    if (!cfg.api_key) {
-      throw new Error("Shopify app is not configured on the server (missing SHOPIFY_CLIENT_ID).");
-    }
-    if (!document.querySelector('meta[name="shopify-api-key"]')) {
-      const meta = document.createElement("meta");
-      meta.name = "shopify-api-key";
-      meta.content = cfg.api_key;
-      document.head.prepend(meta);
-    }
-    await new Promise((resolve, reject) => {
-      if (document.getElementById("shopify-app-bridge-cdn")) {
-        resolve();
-        return;
-      }
-      const s = document.createElement("script");
-      s.id = "shopify-app-bridge-cdn";
-      s.async = false; // App Bridge must NOT be async/defer/module
-      s.src = "https://cdn.shopify.com/shopifycloud/app-bridge.js";
-      s.onload = resolve;
-      s.onerror = () => reject(new Error("Failed to load Shopify App Bridge script."));
-      document.head.appendChild(s);
-    });
-    // Wait (up to ~5s) for the global to initialise.
-    for (let i = 0; i < 50; i++) {
-      if (window.shopify && typeof window.shopify.idToken === "function") return window.shopify;
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    throw new Error("Shopify App Bridge did not initialise. Open the app inside Shopify Admin.");
-  })().catch((e) => {
-    // Do not cache failures so a later (embedded) attempt can retry cleanly.
-    _bridgeReady = null;
-    throw e;
-  });
-
-  return _bridgeReady;
+  // App Bridge is loaded from index.html; give it a moment to initialise (race-safe).
+  for (let i = 0; i < 100; i++) { // up to ~10s
+    if (window.shopify && typeof window.shopify.idToken === "function") return window.shopify;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error("Shopify App Bridge did not initialise. Open the app inside Shopify Admin.");
 }
 
 /** Obtain a fresh, short-lived Shopify session (ID) token via App Bridge. */

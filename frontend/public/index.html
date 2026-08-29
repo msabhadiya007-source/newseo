@@ -22,6 +22,37 @@
         Learn how to configure a non-root public URL by running `npm run build`.
         -->
         <title>Emergent | Fullstack App</title>
+        <script>
+            /* Shopify App Bridge bootstrap. When this app is embedded inside Shopify
+               Admin, App Bridge MUST be loaded from Shopify's CDN in the initial <head>
+               (non-async, with the shopify-api-key meta present first); it cannot be
+               injected later after hydration. The non-secret Shopify Client ID is fetched
+               from the app's own backend at parse time. In a standalone browser tab this
+               does nothing, so the app still loads and fails gracefully on auth. */
+            (function () {
+                try {
+                    var params = new URLSearchParams(window.location.search);
+                    var embedded =
+                        window.top !== window.self ||
+                        params.has("host") ||
+                        params.get("embedded") === "1";
+                    if (!embedded) return;
+                    var xhr = new XMLHttpRequest();
+                    xhr.open("GET", "/api/shopify/config", false); /* same-origin, sync, before App Bridge */
+                    xhr.send();
+                    if (xhr.status !== 200) return;
+                    var cfg = JSON.parse(xhr.responseText || "{}");
+                    if (!cfg.api_key) return;
+                    var key = String(cfg.api_key).replace(/[^A-Za-z0-9._-]/g, "");
+                    document.write('<meta name="shopify-api-key" content="' + key + '">');
+                    document.write(
+                        '<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"><\/script>'
+                    );
+                } catch (e) {
+                    /* never block app load */
+                }
+            })();
+        </script>
         <script>window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);</script>
         <script src="https://assets.emergent.sh/scripts/emergent-main.js"></script>
     </head>
