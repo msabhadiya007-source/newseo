@@ -150,9 +150,9 @@ class ShopifyClient:
     def config_error(self):
         """LIVE mode with missing real credentials must NOT silently fall back to demo."""
         if self._mode == "live" and not self._mock and not (self._domain and self._token):
-            return ("Data mode is LIVE but the Shopify store domain / Admin API access token are "
-                    "not configured. Add them in Settings -> Shopify Connection (or via server env). "
-                    "The app will not fall back to DEMO automatically.")
+            return ("Data mode is LIVE but Shopify is not authenticated. Open the app inside "
+                    "Shopify Admin and authenticate (Token Exchange) from Settings -> Shopify "
+                    "Connection. The app will not fall back to DEMO automatically.")
         return None
 
     def endpoint(self) -> str:
@@ -287,6 +287,37 @@ class ShopifyClient:
                 return {"connected": False, "status": "authentication_failed", "message": "Shopify authentication failed (invalid token)."}
             if "not found" in msg or "404" in msg:
                 return {"connected": False, "status": "api_error", "message": "Shopify API/version error or store not found."}
+            return {"connected": False, "status": "unavailable", "message": f"Shopify unavailable: {e}"}
+
+    # ---- verify the stored (token-exchange) credential directly ----
+    async def verify_stored_connection(self) -> dict:
+        """Test the currently stored Admin token + domain against the real Admin
+        GraphQL API. Independent of APP_DATA_MODE / mock_mode: it validates the
+        credential itself (used by the 'Test Shopify Connection' action after the
+        embedded token-exchange flow). Never returns the token."""
+        if not (self.domain and self.token):
+            return {"connected": False, "status": "not_authenticated",
+                    "message": "No Shopify Admin token is stored yet. Authenticate from the embedded app first."}
+        try:
+            body = await self._http_graphql(SHOP_QUERY, {})
+            data = body.get("data", {})
+            shop = data.get("shop", {})
+            scopes = [s["handle"] for s in (data.get("currentAppInstallation", {}) or {}).get("accessScopes", [])]
+            missing = [s for s in REQUIRED_SCOPES if s not in scopes]
+            if missing:
+                return {"connected": True, "status": "missing_permission", "shop": shop,
+                        "api_version": self.api_version, "granted_scopes": scopes, "missing_scopes": missing,
+                        "message": f"Connected but missing required scopes: {', '.join(missing)}"}
+            return {"connected": True, "status": "connected", "shop": shop,
+                    "api_version": self.api_version, "granted_scopes": scopes, "missing_scopes": []}
+        except Exception as e:  # noqa
+            msg = str(e).lower()
+            if "401" in msg or "unauthorized" in msg or "invalid" in msg:
+                return {"connected": False, "status": "authentication_failed",
+                        "message": "Stored Shopify token was rejected (401). Please re-authenticate."}
+            if "not found" in msg or "404" in msg:
+                return {"connected": False, "status": "api_error",
+                        "message": "Shopify API/version error or store not found."}
             return {"connected": False, "status": "unavailable", "message": f"Shopify unavailable: {e}"}
 
 

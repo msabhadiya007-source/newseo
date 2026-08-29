@@ -19,6 +19,7 @@ api3 = APIRouter(prefix="/api")
 
 
 async def _shopify_status():
+    import shopify_auth
     cfg = app_config.get().get("shopify", {})
     state = await db.sync_state.find_one({"id": shopify_client.data_source}, {"_id": 0})
     conn = await db.app_state.find_one({"id": "shopify_conn"}, {"_id": 0})
@@ -30,7 +31,12 @@ async def _shopify_status():
         "data_source": shopify_client.data_source,
         "connected": shopify_client.is_connected,
         "config_error": shopify_client.config_error,
+        # token_configured retained for backward compat; 'authenticated' is the new name
         "token_configured": await secrets_store.is_configured("shopify_token"),
+        "authenticated": await secrets_store.is_configured("shopify_token"),
+        "app_configured": shopify_auth.is_app_configured(),
+        "auth_method": "token_exchange",
+        "granted_scopes": (conn or {}).get("granted_scopes", []),
         "last_sync": state.get("last_sync") if state else None,
         "last_connection": conn.get("last_connection") if conn else None,
     }
@@ -92,9 +98,9 @@ async def put_shopify(payload: dict = Body(...), user: dict = Depends(require_pe
         patch["mock_mode"] = bool(payload["mock_mode"])
     if patch:
         await app_config.update_shopify(patch)
-    token = payload.get("token")
-    if token:  # only store when a non-empty value is submitted
-        await secrets_store.set_secret("shopify_token", str(token).strip())
+    # The Admin API token is NO LONGER accepted here. It is obtained exclusively via
+    # the embedded Token Exchange flow (POST /api/shopify/auth/token-exchange) and
+    # stored encrypted server-side. Any 'token' field in the payload is ignored.
     await shopify_client.reload()
     await db.audit_log.insert_one({"id": f"CFG-{now_iso()}", "resource_id": "shopify_config",
                                    "resource_type": "config", "source": "SettingsUpdate",

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { api, formatApiError } from "@/lib/api";
+import { authenticateWithShopify, isEmbedded } from "@/lib/shopify";
 import { useAuth } from "@/context/AuthContext";
 import {
   Settings as SettingsIcon, ShieldCheck, Database, Cpu, RefreshCw, CheckCircle2,
-  XCircle, Lock, KeyRound, Sparkles, FileText, Store, Trash2, Eye, EyeOff,
+  XCircle, Lock, KeyRound, Sparkles, FileText, Store, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -43,22 +44,19 @@ const inputCls = "w-full rounded-md border border-input bg-background px-3 py-2 
 function ShopifyTab({ config, refresh, demoPresent, onOpenCleanup }) {
   const s = config.shopify;
   const [form, setForm] = useState({
-    domain: s.domain || "", api_version: s.api_version || "2025-01",
-    mode: s.mode || "demo", mock_mode: !!s.mock_mode, token: "",
+    api_version: s.api_version || "2025-01",
+    mode: s.mode || "demo", mock_mode: !!s.mock_mode,
   });
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [showToken, setShowToken] = useState(false);
+  const [authing, setAuthing] = useState(false);
   const [confirmLive, setConfirmLive] = useState(false);
 
   const doSave = async (formToSave) => {
     setSaving(true);
     try {
-      const body = { ...formToSave };
-      if (!body.token) delete body.token;
-      await api.put("/settings/shopify", body);
-      toast.success("Shopify configuration saved. Token stored securely (never displayed).");
-      setForm((f) => ({ ...f, token: "" }));
+      await api.put("/settings/shopify", formToSave);
+      toast.success("Shopify configuration saved.");
       refresh();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     finally { setSaving(false); setConfirmLive(false); }
@@ -69,10 +67,28 @@ function ShopifyTab({ config, refresh, demoPresent, onOpenCleanup }) {
     doSave(form);
   };
 
+  const authenticate = async () => {
+    setAuthing(true);
+    try {
+      const data = await authenticateWithShopify();
+      toast.success(data.message || `Authenticated with ${data.shop}.`);
+      refresh();
+    } catch (e) {
+      toast.error(isEmbedded()
+        ? (e.message || "Shopify authentication failed.")
+        : "Open this app inside Shopify Admin to authenticate (App Bridge is unavailable in a standalone browser tab).");
+    } finally { setAuthing(false); }
+  };
+
+  const disconnect = async () => {
+    try { await api.post("/shopify/auth/disconnect"); toast.success("Disconnected. Stored Admin token removed."); refresh(); }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
   const testConn = async () => {
     setTesting(true);
     try {
-      const { data } = await api.get("/settings/shopify/test");
+      const { data } = await api.get("/shopify/auth/test");
       let msg = data.message || (data.connected ? "Connected" : "Not connected");
       if (data.missing_scopes?.length) msg += ` Missing scopes: ${data.missing_scopes.join(", ")}`;
       toast[data.connected ? "success" : "error"](msg);
@@ -88,49 +104,68 @@ function ShopifyTab({ config, refresh, demoPresent, onOpenCleanup }) {
   return (
     <div className="space-y-5">
       <div className="rounded-xl border border-border bg-card p-5">
-        <h2 className="mb-4 flex items-center gap-2 font-heading text-lg font-semibold"><ShieldCheck className="h-5 w-5 text-primary" /> Shopify Connection</h2>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Store domain" hint="your-store.myshopify.com">
-            <input data-testid="shopify-domain" className={inputCls} value={form.domain}
-              onChange={(e) => setForm({ ...form, domain: e.target.value })} placeholder="your-store.myshopify.com" />
-          </Field>
+        <h2 className="mb-1 flex items-center gap-2 font-heading text-lg font-semibold"><ShieldCheck className="h-5 w-5 text-primary" /> Shopify Connection</h2>
+        <p className="mb-4 text-xs text-muted-foreground">Authentication uses Shopify's embedded <span className="font-medium">Token Exchange</span> flow. No Admin API token is entered manually — it is obtained and stored securely on the server, and never displayed.</p>
+
+        {!s.app_configured && (
+          <div className="mb-4 flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+            <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> Server app credentials are not configured (SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET). Set them as server environment variables to enable authentication.
+          </div>
+        )}
+
+        <div className="mb-4 rounded-lg border border-border p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {s.authenticated
+                ? <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                : <Lock className="h-5 w-5 text-muted-foreground" />}
+              <div>
+                <div className="text-sm font-semibold">{s.authenticated ? "Authenticated" : "Not authenticated"}</div>
+                <div className="text-xs text-muted-foreground">
+                  {s.authenticated ? `Connected as ${s.domain || "your store"}` : "Open the app inside Shopify Admin and authenticate to connect."}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button data-testid="shopify-authenticate" onClick={authenticate} disabled={authing || !s.app_configured}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
+                {authing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Store className="h-4 w-4" />}
+                {s.authenticated ? "Re-authenticate" : "Authenticate with Shopify"}
+              </button>
+              {s.authenticated && (
+                <button data-testid="shopify-disconnect" onClick={disconnect}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-rose-600/50 bg-rose-600/10 px-3 py-2 text-sm text-rose-400 hover:bg-rose-600/20">
+                  <Trash2 className="h-4 w-4" /> Disconnect
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-3">
           <Field label="Shopify API version">
             <input data-testid="shopify-api-version" className={inputCls} value={form.api_version}
               onChange={(e) => setForm({ ...form, api_version: e.target.value })} placeholder="2025-01" />
           </Field>
-          <Field label="Admin API access token (write-only)"
-            hint={s.token_configured ? "Admin Token: Configured ✅ — enter a new value only to replace it." : "Admin Token: Not configured"}>
-            <div className="relative">
-              <input data-testid="shopify-token" type={showToken ? "text" : "password"} className={inputCls + " pr-9"}
-                value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })}
-                placeholder={s.token_configured ? "•••••••••• (stored)" : "shpat_..."} autoComplete="new-password" />
-              <button type="button" onClick={() => setShowToken((v) => !v)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
+          <Field label="Data mode">
+            <select data-testid="shopify-mode" className={inputCls} value={form.mode}
+              onChange={(e) => setForm({ ...form, mode: e.target.value })}>
+              <option value="demo">DEMO</option>
+              <option value="live">LIVE</option>
+            </select>
           </Field>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Data mode">
-              <select data-testid="shopify-mode" className={inputCls} value={form.mode}
-                onChange={(e) => setForm({ ...form, mode: e.target.value })}>
-                <option value="demo">DEMO</option>
-                <option value="live">LIVE</option>
-              </select>
-            </Field>
-            <Field label="Mock mode">
-              <select data-testid="shopify-mock" className={inputCls} value={form.mock_mode ? "on" : "off"}
-                onChange={(e) => setForm({ ...form, mock_mode: e.target.value === "on" })}>
-                <option value="on">ON</option>
-                <option value="off">OFF</option>
-              </select>
-            </Field>
-          </div>
+          <Field label="Mock mode">
+            <select data-testid="shopify-mock" className={inputCls} value={form.mock_mode ? "on" : "off"}
+              onChange={(e) => setForm({ ...form, mock_mode: e.target.value === "on" })}>
+              <option value="on">ON</option>
+              <option value="off">OFF</option>
+            </select>
+          </Field>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           <button data-testid="shopify-save" onClick={onSaveClick} disabled={saving}
             className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
-            {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Save Shopify Configuration
+            {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Save Configuration
           </button>
           <button data-testid="shopify-test" onClick={testConn} disabled={testing}
             className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm hover:bg-accent">
@@ -151,7 +186,9 @@ function ShopifyTab({ config, refresh, demoPresent, onOpenCleanup }) {
         <div className="space-y-2">
           <Row label="Active mode" value={<span className="font-mono uppercase">{s.mode}</span>} />
           <Row label="Connection status" ok={s.connected} value={s.connected ? (s.mock_mode ? "Connected (mock)" : "Connected") : "Not connected"} />
-          <Row label="Admin token" ok={s.token_configured} value={s.token_configured ? "Configured" : "Not configured"} />
+          <Row label="Authentication" ok={s.authenticated} value={s.authenticated ? "Authenticated (Token Exchange)" : "Not authenticated"} />
+          <Row label="App credentials (server)" ok={s.app_configured} value={s.app_configured ? "Configured" : "Missing"} />
+          <Row label="Granted scopes" value={(s.granted_scopes && s.granted_scopes.length) ? s.granted_scopes.join(", ") : "—"} />
           <Row label="Store domain" value={s.domain || "—"} />
           <Row label="API version" value={s.api_version} />
           <Row label="Mock mode" ok={!s.mock_mode} value={s.mock_mode ? "On (simulated Shopify)" : "Off (real Shopify)"} />

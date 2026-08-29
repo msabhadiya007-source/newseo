@@ -8,6 +8,7 @@ from auth import router as auth_router, seed_admin
 from routes import api
 from bulk_routes import api2
 from settings_routes import api3
+from shopify_auth_routes import api4
 from seo import DEFAULT_RULES
 import app_config
 import prompt_manager
@@ -40,6 +41,7 @@ app.include_router(auth_router)
 app.include_router(api)
 app.include_router(api2)
 app.include_router(api3)
+app.include_router(api4)
 
 _origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
 _frontend = os.environ.get("FRONTEND_URL")

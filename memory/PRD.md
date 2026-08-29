@@ -60,3 +60,17 @@ Production-ready, SEO-ONLY Shopify management platform for a store with ~35,000+
 - Connection test friendly states (connected/authentication_failed/missing_permission/api_error/unavailable/demo_mode). No Shopify token exposed to frontend (server-side env only).
 - Verification: pytest 92 (demo) + tests/test_live_sync.py 20/20 (live+mock) + security 42/42 (both modes); independent API agent 74/74. 35k load test all queries sub-60ms on existing indexes.
 - NOTE: verified against MOCK transport; real store validation pending real SHOPIFY_STORE_DOMAIN/SHOPIFY_ADMIN_ACCESS_TOKEN (SHOPIFY_MOCK_MODE=false).
+
+## Shopify Authentication — Token Exchange (added 2026-08-29)
+The embedded app authenticates via Shopify's OAuth 2.0 **Token Exchange** flow (no manual
+`shpat_` token, no legacy redirect). Frontend App Bridge -> fresh session (ID) token ->
+`POST /api/shopify/auth/token-exchange` (Bearer id_token). Backend validates the JWT
+(HS256 w/ `SHOPIFY_CLIENT_SECRET`, `exp`/`nbf`/`aud==SHOPIFY_CLIENT_ID`/`iss==dest` shop),
+then exchanges it at `https://{shop}/admin/oauth/access_token` for an **offline** Admin API
+token, stored encrypted via `secrets_store('shopify_token')`. Shop domain is taken from the
+validated `dest` claim. Token is never returned to the browser/logs/responses.
+`APP_DATA_MODE` is an explicit server-side switch (NOT auto-flipped); no auto-sync on auth.
+Backend: `shopify_auth.py`, `shopify_auth_routes.py`. Routes: `POST /api/shopify/auth/token-exchange`,
+`GET /api/shopify/auth/status`, `GET /api/shopify/auth/test`, `POST /api/shopify/auth/disconnect`,
+`GET /api/shopify/config` (public, client id only).
+
