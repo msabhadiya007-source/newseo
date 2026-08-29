@@ -7,7 +7,7 @@ import json
 import time
 
 # Base URL from frontend/.env
-BASE_URL = "https://admin-demo-cleanup.preview.emergentagent.com/api"
+BASE_URL = "https://repo-link-17.preview.emergentagent.com/api"
 
 # Test credentials from /app/memory/test_credentials.md
 ADMIN_EMAIL = "msabhadiya007@gmail.com"
