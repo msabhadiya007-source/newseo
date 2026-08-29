@@ -32,6 +32,15 @@ export function isEmbedded() {
  */
 export async function ensureAppBridge() {
   if (window.shopify && typeof window.shopify.idToken === "function") return window.shopify;
+
+  // App Bridge only works when the app is embedded inside Shopify Admin. Loading the
+  // CDN script in a standalone browser tab makes App Bridge abort with a thrown error
+  // ("must be the first <script> tag ... Aborting"), so we never load it here. This
+  // check lives OUTSIDE the cached promise so it always fails fast (and cleanly).
+  if (!isEmbedded()) {
+    throw new Error("NOT_EMBEDDED");
+  }
+
   if (_bridgeReady) return _bridgeReady;
 
   _bridgeReady = (async () => {
@@ -52,6 +61,7 @@ export async function ensureAppBridge() {
       }
       const s = document.createElement("script");
       s.id = "shopify-app-bridge-cdn";
+      s.async = false; // App Bridge must NOT be async/defer/module
       s.src = "https://cdn.shopify.com/shopifycloud/app-bridge.js";
       s.onload = resolve;
       s.onerror = () => reject(new Error("Failed to load Shopify App Bridge script."));
@@ -63,7 +73,11 @@ export async function ensureAppBridge() {
       await new Promise((r) => setTimeout(r, 100));
     }
     throw new Error("Shopify App Bridge did not initialise. Open the app inside Shopify Admin.");
-  })();
+  })().catch((e) => {
+    // Do not cache failures so a later (embedded) attempt can retry cleanly.
+    _bridgeReady = null;
+    throw e;
+  });
 
   return _bridgeReady;
 }
