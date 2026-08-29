@@ -20,7 +20,7 @@ const ISSUES = [
   ["TITLE_TOO_SHORT", "Title Too Short"], ["TITLE_ABOVE_RANGE", "Title Above Range"],
   ["META_TOO_SHORT", "Meta Too Short"], ["META_ABOVE_RANGE", "Meta Above Range"],
   ["DUPLICATE_TITLE", "Duplicate Titles"], ["DUPLICATE_META", "Duplicate Descriptions"],
-  ["MISSING_ALT", "Missing ALT"], ["KEYWORD_STUFFING", "Keyword Stuffing"],
+  ["KEYWORD_STUFFING", "Keyword Stuffing"],
 ];
 
 export default function Products() {
@@ -52,7 +52,7 @@ export default function Products() {
     <div className="space-y-5">
       <div>
         <h1 className="font-heading text-3xl font-bold tracking-tight">Products SEO Queues</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Edit SEO title, meta description & image ALT only. Commerce fields are locked.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Edit SEO title & meta description only. Commerce fields are locked.</p>
       </div>
 
       <div className="flex flex-wrap gap-1.5 border-b border-border pb-3">

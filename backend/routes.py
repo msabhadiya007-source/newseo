@@ -82,7 +82,10 @@ async def dashboard_metrics(user: dict = Depends(get_current_user), source: str 
     ]
     issues = {}
     async for row in db.products.aggregate(pipeline):
-        issues[row["_id"]] = row["count"]
+        # Defensive: ignore any decommissioned/historical issue codes (e.g. removed
+        # image-ALT checks) so they never surface in dashboards or SEO Health.
+        if row["_id"] in ISSUE_LABELS:
+            issues[row["_id"]] = row["count"]
 
     # weighted health = avg score
     agg = await db.products.aggregate([

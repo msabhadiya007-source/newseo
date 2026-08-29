@@ -12,7 +12,7 @@ async def get_rules() -> dict:
 
 def _dup_sets(items):
     """Values appearing more than once (case-insensitive)."""
-    titles, metas, alts = {}, {}, {}
+    titles, metas = {}, {}
     for p in items:
         t = (p.get("current_seo_title") or "").strip().lower()
         m = (p.get("current_seo_description") or "").strip().lower()
@@ -20,22 +20,17 @@ def _dup_sets(items):
             titles[t] = titles.get(t, 0) + 1
         if m:
             metas[m] = metas.get(m, 0) + 1
-        for im in p.get("images", []) or []:
-            a = (im.get("alt") or "").strip().lower()
-            if a:
-                alts[a] = alts.get(a, 0) + 1
     return ({k for k, v in titles.items() if v > 1},
-            {k for k, v in metas.items() if v > 1},
-            {k for k, v in alts.items() if v > 1})
+            {k for k, v in metas.items() if v > 1})
 
 
 async def reanalyze_all(source: str, progress_cb=None):
     rules = await get_rules()
     products = await db.products.find({"data_source": source}).to_list(None)
-    dt, dm, da = _dup_sets(products)
+    dt, dm = _dup_sets(products)
     total = len(products)
     for idx, p in enumerate(products):
-        issues, score, breakdown, bucket = analyze(p, rules, dt, dm, da)
+        issues, score, breakdown, bucket = analyze(p, rules, dt, dm)
         await db.products.update_one({"id": p["id"]}, {"$set": {
             "issue_codes": issues, "seo_score": score,
             "score_breakdown": breakdown, "status_bucket": bucket,
@@ -44,9 +39,9 @@ async def reanalyze_all(source: str, progress_cb=None):
             await progress_cb(idx, total)
     # Collections
     collections = await db.collections_seo.find({"data_source": source}).to_list(None)
-    ct, cm, _ = _dup_sets(collections)
+    ct, cm = _dup_sets(collections)
     for c in collections:
-        issues, score, breakdown, bucket = analyze(c, rules, ct, cm, set())
+        issues, score, breakdown, bucket = analyze(c, rules, ct, cm)
         await db.collections_seo.update_one({"id": c["id"]}, {"$set": {
             "issue_codes": issues, "seo_score": score,
             "score_breakdown": breakdown, "status_bucket": bucket,
@@ -70,7 +65,7 @@ async def reanalyze_one_product(product_id: str):
     if meta and await db.products.count_documents(
             {"current_seo_description": p["current_seo_description"], "id": {"$ne": product_id}}) > 0:
         dm.add(meta.lower())
-    issues, score, breakdown, bucket = analyze(p, rules, dt, dm, set())
+    issues, score, breakdown, bucket = analyze(p, rules, dt, dm)
     await db.products.update_one({"id": product_id}, {"$set": {
         "issue_codes": issues, "seo_score": score,
         "score_breakdown": breakdown, "status_bucket": bucket,
@@ -85,7 +80,7 @@ async def reanalyze_one_collection(collection_id: str):
     c = await db.collections_seo.find_one({"id": collection_id})
     if not c:
         return None
-    issues, score, breakdown, bucket = analyze(c, rules, set(), set(), set())
+    issues, score, breakdown, bucket = analyze(c, rules, set(), set())
     await db.collections_seo.update_one({"id": collection_id}, {"$set": {
         "issue_codes": issues, "seo_score": score,
         "score_breakdown": breakdown, "status_bucket": bucket,

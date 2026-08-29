@@ -22,8 +22,6 @@ DUPLICATE_TITLE = "DUPLICATE_TITLE"
 DUPLICATE_META = "DUPLICATE_META"
 KEYWORD_STUFFING = "KEYWORD_STUFFING"
 REPETITIVE_TITLE = "REPETITIVE_TITLE"
-MISSING_ALT = "MISSING_ALT"
-DUPLICATE_ALT = "DUPLICATE_ALT"
 
 ISSUE_LABELS = {
     MISSING_SEO_TITLE: "Missing SEO title",
@@ -36,8 +34,6 @@ ISSUE_LABELS = {
     DUPLICATE_META: "Duplicate meta description",
     KEYWORD_STUFFING: "Keyword stuffing indicators",
     REPETITIVE_TITLE: "Repetitive title",
-    MISSING_ALT: "Missing image ALT text",
-    DUPLICATE_ALT: "Duplicate image ALT text",
 }
 
 
@@ -49,12 +45,11 @@ def _keyword_stuffing(text: str) -> bool:
     return any(c >= 4 for c in counts.values())
 
 
-def analyze(product: dict, rules: dict, dup_titles: set, dup_metas: set, dup_alts: set):
+def analyze(product: dict, rules: dict, dup_titles: set, dup_metas: set):
     """Return (issue_codes, score, breakdown, status_bucket)."""
     r = {**DEFAULT_RULES, **(rules or {})}
     title = (product.get("current_seo_title") or "").strip()
     meta = (product.get("current_seo_description") or "").strip()
-    images = product.get("images") or []
     brand = r["brand"].lower()
 
     issues = []
@@ -64,9 +59,9 @@ def analyze(product: dict, rules: dict, dup_titles: set, dup_metas: set, dup_alt
     # Deterministic points out of 70
     det = 0.0
 
-    # Title presence (15)
+    # Title presence (16)
     if title:
-        det += 15
+        det += 16
         positives.append("SEO title present")
     else:
         issues.append(MISSING_SEO_TITLE)
@@ -87,9 +82,9 @@ def analyze(product: dict, rules: dict, dup_titles: set, dup_metas: set, dup_alt
             det += 5
             problems.append(f"Title is {tlen} characters, above the recommended {r['title_min']}-{r['title_max']}")
 
-    # Meta presence (15)
+    # Meta presence (16)
     if meta:
-        det += 15
+        det += 16
         positives.append("Meta description present")
     else:
         issues.append(MISSING_META_DESCRIPTION)
@@ -126,32 +121,21 @@ def analyze(product: dict, rules: dict, dup_titles: set, dup_metas: set, dup_alt
             det += 7
             positives.append("Meta description is unique")
 
-    # Keyword stuffing (3)
+    # Keyword stuffing (4)
     if title and _keyword_stuffing(title):
         issues.append(KEYWORD_STUFFING)
         problems.append("Title shows keyword stuffing / excessive repetition")
     else:
-        det += 3
+        det += 4
 
     # Brand presence (informational positive, no dedicated points)
     if title and brand in title.lower():
         positives.append(f"Brand '{r['brand']}' present in title")
 
-    # ALT coverage (3)
-    if images:
-        missing_alt = [im for im in images if not (im.get("alt") or "").strip()]
-        alt_values = [(im.get("alt") or "").strip().lower() for im in images if (im.get("alt") or "").strip()]
-        if missing_alt:
-            issues.append(MISSING_ALT)
-            problems.append(f"{len(missing_alt)} of {len(images)} images are missing ALT text")
-        else:
-            det += 3
-            positives.append("All images have ALT text")
-        if any(a in dup_alts for a in alt_values):
-            issues.append(DUPLICATE_ALT)
-            problems.append("One or more image ALT texts are duplicated")
-    else:
-        det += 3
+    # (Image ALT SEO analysis has been removed from scope — it contributes ZERO to the
+    # score and is never emitted as an issue. The 3 former ALT points were redistributed
+    # to Title presence (+1), Meta presence (+1) and Keyword stuffing (+1) so the
+    # deterministic maximum remains 70 and scores still normalize to 0-100.)
 
     det = round(min(70.0, det), 1)
 
