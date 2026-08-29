@@ -30,17 +30,19 @@ export function isEmbedded() {
 /**
  * Resolve the global `window.shopify` provided by App Bridge.
  *
- * App Bridge v4 MUST be loaded from Shopify's CDN in the INITIAL <head> (non-async,
- * with the shopify-api-key meta present first). That is done in public/index.html —
- * it cannot be injected at runtime after hydration (Shopify aborts). Here we only
- * WAIT for the global to become available. In a standalone (non-embedded) tab App
- * Bridge is intentionally never loaded, so we fail fast and cleanly.
+ * App Bridge v4 is loaded statically from Shopify's CDN in the initial <head>
+ * (see public/index.html) with the shopify-api-key meta injected at build time from
+ * REACT_APP_SHOPIFY_API_KEY. Here we only WAIT for the global to be ready.
+ *
+ * IMPORTANT: the embedded check runs FIRST. App Bridge's script is present on every
+ * page (even a standalone tab), so `window.shopify` may exist outside Shopify Admin —
+ * but calling idToken() there never resolves. Failing fast keeps standalone graceful.
  */
 export async function ensureAppBridge() {
-  if (window.shopify && typeof window.shopify.idToken === "function") return window.shopify;
   if (!isEmbedded()) {
     throw new Error("NOT_EMBEDDED");
   }
+  if (window.shopify && typeof window.shopify.idToken === "function") return window.shopify;
   // App Bridge is loaded from index.html; give it a moment to initialise (race-safe).
   for (let i = 0; i < 100; i++) { // up to ~10s
     if (window.shopify && typeof window.shopify.idToken === "function") return window.shopify;
