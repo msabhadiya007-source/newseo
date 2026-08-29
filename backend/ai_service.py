@@ -35,38 +35,46 @@ def _build_context(product: dict, rules: dict) -> str:
 
 
 async def generate_seo(product: dict, rules: dict, field: str) -> str:
-    """field: 'seo_title' | 'meta_description'. Returns generated text."""
-    if not ai_configured():
-        raise RuntimeError("AI provider unavailable")
+    """field: 'seo_title' | 'meta_description'. Returns generated text.
 
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    Routes through the settings-based multi-provider layer (ai_providers) so the saved
+    default provider, its encrypted API key and saved model are ACTUALLY used. Previously
+    this used only the EMERGENT_LLM_KEY env var, so a saved Gemini default was never
+    resolved -> "AI provider unavailable". Draft-only: this never publishes to Shopify.
+    """
+    import ai_providers  # local import avoids any import cycle at module load
 
-    provider = os.environ.get("AI_PROVIDER", "openai")
-    model = os.environ.get("AI_MODEL", "gpt-5.4")
+    # Resolves the saved default provider, checks AI-enabled, loads the encrypted key
+    # and saved model (raises ProviderError with a clear code if disabled/not configured).
+    prov = await ai_providers.get_provider()
 
-    if field == "seo_title":
-        target = f"an SEO title between {rules.get('title_min', 50)} and {rules.get('title_max', 60)} characters"
-        instruction = (
-            f"Write {target} for this ecommerce product. Include the brand naturally. "
-            "Use natural search language, avoid keyword stuffing. Return ONLY the title text, no quotes."
-        )
-    else:
-        target = f"a meta description between {rules.get('meta_min', 140)} and {rules.get('meta_max', 160)} characters"
-        instruction = (
-            f"Write {target} for this ecommerce product. Describe it accurately with meaningful "
-            "purchase context and a natural call to action. Return ONLY the description text, no quotes."
-        )
-
+    tmin, tmax = rules.get("title_min", 50), rules.get("title_max", 60)
+    mmin, mmax = rules.get("meta_min", 140), rules.get("meta_max", 160)
     system = (
         "You are an expert ecommerce SEO copywriter for the Australian market. "
         + HALLUCINATION_GUARD
+        + f" Produce an SEO title ({tmin}-{tmax} characters) and a meta description "
+        f"({mmin}-{mmax} characters). Include the brand naturally; use natural search "
+        'language and avoid keyword stuffing. Return ONLY compact JSON of the exact form '
+        '{"seo_title": "...", "meta_description": "..."}.'
     )
-    chat = LlmChat(
-        api_key=os.environ["EMERGENT_LLM_KEY"],
-        session_id=f"seo-{product.get('id', 'x')}-{field}",
-        system_message=system,
-    ).with_model(provider, model)
+    context = {
+        "brand": rules.get("brand", "UrbanDotted"),
+        "country": rules.get("country", "Australia"),
+        "product_name": product.get("title", ""),
+        "product_title": product.get("title", ""),
+        "product_type": product.get("product_type", ""),
+        "vendor": product.get("vendor", ""),
+        "tags": product.get("tags", []) or [],
+        "handle": product.get("handle", ""),
+        "verified_features": [],
+        "current_seo_title": product.get("current_seo_title", "") or "",
+        "current_seo_description": product.get("current_seo_description", "") or "",
+    }
 
-    prompt = f"{_build_context(product, rules)}\nTask: {instruction}"
-    text = await chat.send_message(UserMessage(text=prompt))
-    return (text or "").strip().strip('"').strip()
+    res = await prov.generate_product_seo(system, context)
+    data = (res or {}).get("result", {}) or {}
+    value = data.get("seo_title") if field == "seo_title" else data.get("meta_description")
+    if not value:
+        raise RuntimeError("AI returned no suggestion")
+    return str(value).strip().strip('"').strip()
