@@ -80,40 +80,79 @@ class ShopifyClient:
     MAX_RETRIES = 5
 
     def __init__(self):
-        self.domain = os.environ.get("SHOPIFY_STORE_DOMAIN", "").strip()
-        self.token = os.environ.get("SHOPIFY_ADMIN_ACCESS_TOKEN", "").strip()
-        self.api_version = os.environ.get("SHOPIFY_API_VERSION", "").strip() or "2025-01"
+        # effective config cache (populated by reload(); safe DEMO defaults until then)
+        self._domain = ""
+        self._token = ""
+        self._api_version = "2025-01"
+        self._mode = "demo"
+        self._mock = True
+
+    async def reload(self):
+        """Resolve effective config. Priority: ENV override -> UI-stored config/secret -> default.
+        Called at startup and after any Shopify config/secret change so sync properties
+        always reflect current settings without awaiting Mongo."""
+        import app_config
+        import secrets_store
+        cfg = app_config.get().get("shopify", {})
+        env = os.environ.get
+
+        m = env("APP_DATA_MODE")
+        self._mode = (m if m else cfg.get("mode") or "demo").strip().lower()
+
+        mock_env = env("SHOPIFY_MOCK_MODE")
+        if mock_env not in (None, ""):
+            self._mock = mock_env.strip().lower() == "true"
+        else:
+            self._mock = bool(cfg.get("mock_mode", True))
+
+        self._domain = (env("SHOPIFY_STORE_DOMAIN") or cfg.get("domain") or "").strip()
+        self._api_version = (env("SHOPIFY_API_VERSION") or cfg.get("api_version") or "2025-01").strip()
+        self._token = (await secrets_store.get_secret("shopify_token")) or ""
+        return self
+
+    # ---- effective config (backward-compatible attribute access) ----
+    @property
+    def domain(self) -> str:
+        return self._domain
+
+    @property
+    def token(self) -> str:
+        return self._token
+
+    @property
+    def api_version(self) -> str:
+        return self._api_version
 
     # ---- mode / connectivity ----
     @property
     def mode(self) -> str:
-        return os.environ.get("APP_DATA_MODE", "demo").strip().lower()
+        return self._mode
 
     @property
     def mock_mode(self) -> bool:
-        return os.environ.get("SHOPIFY_MOCK_MODE", "true").strip().lower() == "true"
+        return self._mock
 
     @property
     def data_source(self) -> str:
-        return "live" if self.mode == "live" else "demo"
+        return "live" if self._mode == "live" else "demo"
 
     @property
     def use_real(self) -> bool:
-        return (not self.mock_mode) and bool(self.domain and self.token)
+        return (not self._mock) and bool(self._domain and self._token)
 
     @property
     def is_connected(self) -> bool:
-        if self.mode != "live":
+        if self._mode != "live":
             return False
-        return self.mock_mode or bool(self.domain and self.token)
+        return self._mock or bool(self._domain and self._token)
 
     @property
     def config_error(self):
         """LIVE mode with missing real credentials must NOT silently fall back to demo."""
-        if self.mode == "live" and not self.mock_mode and not (self.domain and self.token):
-            return ("APP_DATA_MODE=live but SHOPIFY_STORE_DOMAIN / SHOPIFY_ADMIN_ACCESS_TOKEN "
-                    "are not configured. Set them (and SHOPIFY_MOCK_MODE=false) server-side; "
-                    "the app will not fall back to DEMO automatically.")
+        if self._mode == "live" and not self._mock and not (self._domain and self._token):
+            return ("Data mode is LIVE but the Shopify store domain / Admin API access token are "
+                    "not configured. Add them in Settings -> Shopify Connection (or via server env). "
+                    "The app will not fall back to DEMO automatically.")
         return None
 
     def endpoint(self) -> str:

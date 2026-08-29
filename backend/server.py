@@ -7,7 +7,10 @@ from db import db, client
 from auth import router as auth_router, seed_admin
 from routes import api
 from bulk_routes import api2
+from settings_routes import api3
 from seo import DEFAULT_RULES
+import app_config
+import prompt_manager
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -36,6 +39,7 @@ async def ready():
 app.include_router(auth_router)
 app.include_router(api)
 app.include_router(api2)
+app.include_router(api3)
 
 _origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
 _frontend = os.environ.get("FRONTEND_URL")
@@ -60,6 +64,14 @@ app.add_middleware(
 async def startup():
     logger.info("Starting UrbanDotted SEO Operations backend")
     await seed_admin()
+    # load central config + secure secrets resolver, then seed default AI prompts
+    await app_config.load()
+    await prompt_manager.ensure_seeded()
+    await db.app_secrets.create_index("id", unique=True)
+    await db.app_config.create_index("id", unique=True)
+    await db.ai_prompts.create_index([("type", 1), ("version", 1)], unique=True)
+    await db.ai_prompts.create_index([("type", 1), ("active", 1)])
+    await db.ai_usage.create_index("day")
     await db.users.create_index("email", unique=True)
     await db.users.create_index("id", unique=True)
     await db.products.create_index("id", unique=True)
@@ -106,6 +118,7 @@ async def startup():
     except Exception:  # noqa
         logger.exception("Job recovery on startup failed")
     from shopify_client import shopify_client
+    await shopify_client.reload()
     logger.info("Startup complete. Mode: %s | data_source: %s | mock: %s",
                 shopify_client.mode, shopify_client.data_source, shopify_client.mock_mode)
 

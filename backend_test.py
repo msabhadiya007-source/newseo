@@ -1,554 +1,490 @@
 #!/usr/bin/env python3
-"""
-Phase 3.5 Backend API Testing - Real Shopify Live Sync
-Tests all acceptance criteria for the UrbanDotted SEO Operations app
+"""Phase-6 Secure Configuration Backend Testing
+Tests secure Shopify/AI config endpoints, secret non-disclosure, prompt manager, role gating.
 """
 import requests
-import time
 import json
-from typing import Dict, Any, Optional
+import time
 
-# Configuration
+# Base URL from frontend/.env
 BASE_URL = "https://admin-demo-cleanup.preview.emergentagent.com/api"
+
+# Test credentials from /app/memory/test_credentials.md
 ADMIN_EMAIL = "msabhadiya007@gmail.com"
 ADMIN_PASSWORD = "Admin@12345"
+VIEWER_EMAIL = "viewer@urbandotted.com"
+VIEWER_PASSWORD = "Viewer@12345"
 
-class TestRunner:
-    def __init__(self):
-        self.token: Optional[str] = None
-        self.headers: Dict[str, str] = {}
-        self.results = []
-        self.failed_count = 0
-        self.passed_count = 0
+# Test state
+admin_token = None
+viewer_token = None
+test_product_id = None
+
+def log(msg):
+    print(f"  {msg}")
+
+def login(email, password):
+    """Login and return JWT token"""
+    r = requests.post(f"{BASE_URL}/auth/login", json={"email": email, "password": password})
+    if r.status_code != 200:
+        raise Exception(f"Login failed for {email}: {r.status_code} {r.text}")
+    return r.json()["token"]
+
+def headers(token):
+    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+def test_1_get_config_structure():
+    """TEST 1: GET /api/settings/config returns correct structure with NO secrets"""
+    log("TEST 1: GET /api/settings/config structure + secret non-disclosure")
+    r = requests.get(f"{BASE_URL}/settings/config", headers=headers(admin_token))
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}"
+    
+    data = r.json()
+    
+    # Check top-level keys
+    assert "secrets_available" in data, "Missing secrets_available"
+    assert "shopify" in data, "Missing shopify"
+    assert "ai" in data, "Missing ai"
+    assert "usage_today" in data, "Missing usage_today"
+    
+    # Check shopify structure
+    shopify = data["shopify"]
+    required_shopify = ["mode", "mock_mode", "domain", "api_version", "connected", 
+                        "config_error", "token_configured", "last_sync", "last_connection"]
+    for key in required_shopify:
+        assert key in shopify, f"Missing shopify.{key}"
+    
+    # Check AI structure
+    ai = data["ai"]
+    assert "enabled" in ai, "Missing ai.enabled"
+    assert "default_provider" in ai, "Missing ai.default_provider"
+    assert "providers" in ai, "Missing ai.providers"
+    assert "usage_today" in data, "Missing usage_today"
+    
+    # Check AI providers
+    providers = ai["providers"]
+    for p in ["openai", "anthropic", "gemini", "deepseek"]:
+        assert p in providers, f"Missing provider {p}"
+        assert "enabled" in providers[p], f"Missing {p}.enabled"
+        assert "model" in providers[p], f"Missing {p}.model"
+        assert "key_configured" in providers[p], f"Missing {p}.key_configured"
+    
+    # CRITICAL: Verify NO secrets in response
+    response_text = json.dumps(data)
+    forbidden_patterns = ["token", "api_key", "shpat_", "sk-", "Bearer"]
+    # Allow "token_configured" and "key_configured" but not actual token values
+    assert "shpat_" not in response_text, "SECURITY VIOLATION: Shopify token exposed"
+    assert "sk-" not in response_text, "SECURITY VIOLATION: API key exposed"
+    
+    log(f"✅ PASS: Config structure correct, secrets_available={data['secrets_available']}")
+    log(f"   Shopify: mode={shopify['mode']}, mock={shopify['mock_mode']}, token_configured={shopify['token_configured']}")
+    log(f"   AI: default={ai['default_provider']}, providers={list(providers.keys())}")
+    return data
+
+def test_2_secret_write_only():
+    """TEST 2: Secret write-only + non-disclosure (PUT shopify token, PUT AI keys)"""
+    log("TEST 2: Secret write-only + non-disclosure")
+    
+    # 2a. PUT Shopify token
+    log("  2a. PUT /api/settings/shopify with token")
+    payload = {
+        "domain": "unittest.myshopify.com",
+        "mode": "demo",
+        "mock_mode": True,
+        "token": "shpat_TESTSECRET_ABC123"
+    }
+    r = requests.put(f"{BASE_URL}/settings/shopify", headers=headers(admin_token), json=payload)
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+    
+    shopify_resp = r.json()
+    # Response must NOT contain the token
+    assert "shpat_TESTSECRET_ABC123" not in json.dumps(shopify_resp), "SECURITY VIOLATION: Token echoed in response"
+    assert shopify_resp.get("token_configured") == True, "token_configured should be true"
+    log(f"  ✅ Shopify token stored, token_configured={shopify_resp['token_configured']}, NOT echoed")
+    
+    # 2b. PUT OpenAI key
+    log("  2b. PUT /api/settings/ai/openai with api_key")
+    payload = {
+        "api_key": "sk-TESTKEY-OPENAI-XYZ",
+        "model": "gpt-5.4",
+        "enabled": True
+    }
+    r = requests.put(f"{BASE_URL}/settings/ai/openai", headers=headers(admin_token), json=payload)
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+    
+    ai_resp = r.json()
+    # Response must NOT contain the key
+    assert "sk-TESTKEY-OPENAI-XYZ" not in json.dumps(ai_resp), "SECURITY VIOLATION: API key echoed in response"
+    assert ai_resp["status"]["key_configured"] == True, "key_configured should be true"
+    log(f"  ✅ OpenAI key stored, key_configured={ai_resp['status']['key_configured']}, NOT echoed")
+    
+    # 2c. GET /api/settings/config again - secrets must NOT appear
+    log("  2c. GET /api/settings/config - verify secrets NOT in response")
+    r = requests.get(f"{BASE_URL}/settings/config", headers=headers(admin_token))
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}"
+    
+    config_text = json.dumps(r.json())
+    assert "shpat_TESTSECRET_ABC123" not in config_text, "SECURITY VIOLATION: Shopify token in config response"
+    assert "sk-TESTKEY-OPENAI-XYZ" not in config_text, "SECURITY VIOLATION: OpenAI key in config response"
+    log(f"  ✅ Secrets NOT disclosed in GET /api/settings/config")
+
+def test_3_per_provider_test_connection():
+    """TEST 3: Per-provider test connection"""
+    log("TEST 3: Per-provider test connection")
+    
+    # 3a. Test Anthropic (no key configured)
+    log("  3a. GET /api/settings/ai/anthropic/test (no key)")
+    r = requests.get(f"{BASE_URL}/settings/ai/anthropic/test", headers=headers(admin_token))
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+    data = r.json()
+    assert data["connected"] == False, "Should be not connected"
+    assert data["status"] == "not_configured", f"Expected not_configured, got {data['status']}"
+    log(f"  ✅ Anthropic (no key): connected={data['connected']}, status={data['status']}")
+    
+    # 3b. Test OpenAI (fake key from test 2)
+    log("  3b. GET /api/settings/ai/openai/test (fake key)")
+    r = requests.get(f"{BASE_URL}/settings/ai/openai/test", headers=headers(admin_token))
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+    data = r.json()
+    assert data["connected"] == False, "Should be not connected with fake key"
+    assert data["status"] in ["invalid_api_key", "error"], f"Expected invalid_api_key or error, got {data['status']}"
+    # Must NOT leak the key
+    assert "sk-TESTKEY-OPENAI-XYZ" not in json.dumps(data), "SECURITY VIOLATION: Key leaked in test response"
+    log(f"  ✅ OpenAI (fake key): connected={data['connected']}, status={data['status']}, key NOT leaked")
+    
+    # 3c. Test invalid provider
+    log("  3c. GET /api/settings/ai/foobar/test (invalid provider)")
+    r = requests.get(f"{BASE_URL}/settings/ai/foobar/test", headers=headers(admin_token))
+    assert r.status_code == 404, f"Expected 404, got {r.status_code}"
+    log(f"  ✅ Invalid provider returns 404")
+
+def test_4_default_provider_validation():
+    """TEST 4: Default provider + validation"""
+    log("TEST 4: Default provider validation")
+    
+    # 4a. Set valid default provider
+    log("  4a. PUT /api/settings/ai with default_provider=gemini")
+    r = requests.put(f"{BASE_URL}/settings/ai", headers=headers(admin_token), 
+                     json={"default_provider": "gemini"})
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+    log(f"  ✅ Set default_provider=gemini")
+    
+    # Verify in config
+    r = requests.get(f"{BASE_URL}/settings/config", headers=headers(admin_token))
+    assert r.status_code == 200
+    assert r.json()["ai"]["default_provider"] == "gemini", "default_provider not updated"
+    log(f"  ✅ Verified default_provider=gemini in config")
+    
+    # 4b. Try invalid default provider
+    log("  4b. PUT /api/settings/ai with default_provider=notreal")
+    r = requests.put(f"{BASE_URL}/settings/ai", headers=headers(admin_token), 
+                     json={"default_provider": "notreal"})
+    assert r.status_code == 400, f"Expected 400, got {r.status_code}"
+    log(f"  ✅ Invalid default_provider rejected with 400")
+    
+    # 4c. Try invalid mode
+    log("  4c. PUT /api/settings/shopify with mode=sideways")
+    r = requests.put(f"{BASE_URL}/settings/shopify", headers=headers(admin_token), 
+                     json={"mode": "sideways"})
+    assert r.status_code == 400, f"Expected 400, got {r.status_code}"
+    log(f"  ✅ Invalid mode rejected with 400")
+    
+    # 4d. Try invalid provider endpoint
+    log("  4d. PUT /api/settings/ai/foobar")
+    r = requests.put(f"{BASE_URL}/settings/ai/foobar", headers=headers(admin_token), 
+                     json={"model": "x"})
+    assert r.status_code == 404, f"Expected 404, got {r.status_code}"
+    log(f"  ✅ Invalid provider endpoint returns 404")
+
+def test_5_live_safety():
+    """TEST 5: LIVE safety (must revert after!)"""
+    log("TEST 5: LIVE safety (will revert)")
+    
+    # 5a. Delete token first
+    log("  5a. DELETE /api/settings/shopify/token")
+    r = requests.delete(f"{BASE_URL}/settings/shopify/token", headers=headers(admin_token))
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}"
+    log(f"  ✅ Token deleted")
+    
+    # 5b. Switch to LIVE mode
+    log("  5b. PUT /api/settings/shopify mode=live, mock_mode=false")
+    r = requests.put(f"{BASE_URL}/settings/shopify", headers=headers(admin_token), 
+                     json={"mode": "live", "mock_mode": False})
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+    
+    data = r.json()
+    assert data["mode"] == "live", f"Expected mode=live, got {data['mode']}"
+    assert data["data_source"] == "live", f"Expected data_source=live, got {data['data_source']}"
+    assert data["connected"] == False, "Should be not connected without token"
+    assert data["config_error"] != "", "config_error should be non-empty"
+    log(f"  ✅ LIVE mode: mode={data['mode']}, data_source={data['data_source']}, connected={data['connected']}")
+    log(f"     config_error='{data['config_error']}'")
+    
+    # 5c. Revert to DEMO
+    log("  5c. REVERT to demo+mock")
+    r = requests.put(f"{BASE_URL}/settings/shopify", headers=headers(admin_token), 
+                     json={"mode": "demo", "mock_mode": True})
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}"
+    
+    data = r.json()
+    assert data["mode"] == "demo", "Failed to revert to demo"
+    # config_error can be None or "" in demo mode (both mean no error)
+    assert data["config_error"] in (None, ""), f"config_error should be cleared, got '{data['config_error']}'"
+    log(f"  ✅ Reverted to DEMO: mode={data['mode']}, config_error cleared")
+
+def test_6_prompt_manager():
+    """TEST 6: Prompt manager CRUD"""
+    log("TEST 6: Prompt manager")
+    
+    # 6a. GET /api/settings/prompts
+    log("  6a. GET /api/settings/prompts")
+    r = requests.get(f"{BASE_URL}/settings/prompts", headers=headers(admin_token))
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}"
+    
+    data = r.json()
+    for ptype in ["product_seo", "collection_seo", "quality_review"]:
+        assert ptype in data, f"Missing prompt type {ptype}"
+        p = data[ptype]
+        assert "active_version" in p, f"Missing {ptype}.active_version"
+        assert "text" in p, f"Missing {ptype}.text"
+        assert "versions" in p, f"Missing {ptype}.versions"
+        assert "is_default" in p, f"Missing {ptype}.is_default"
+    log(f"  ✅ All 3 prompt types present with correct structure")
+    
+    # Store original state
+    original_product_seo = data["product_seo"]
+    original_version = original_product_seo["active_version"]
+    
+    # 6b. PUT custom prompt (valid)
+    log("  6b. PUT /api/settings/prompts/product_seo (custom 60+ char prompt)")
+    custom_prompt = "This is a custom SEO prompt for testing purposes. It must be at least 60 characters long to pass validation and return JSON only."
+    r = requests.put(f"{BASE_URL}/settings/prompts/product_seo", headers=headers(admin_token), 
+                     json={"text": custom_prompt})
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+    
+    result = r.json()
+    assert result["ok"] == True, "Expected ok=true"
+    assert result["version"] > original_version, f"Version should increment, got {result['version']}"
+    log(f"  ✅ Custom prompt saved, version incremented to {result['version']}")
+    
+    # 6c. Verify in GET
+    log("  6c. GET /api/settings/prompts - verify custom prompt active")
+    r = requests.get(f"{BASE_URL}/settings/prompts", headers=headers(admin_token))
+    assert r.status_code == 200
+    data = r.json()
+    assert data["product_seo"]["is_default"] == False, "Should not be default"
+    assert data["product_seo"]["active_version"] > original_version, "Version should be higher"
+    assert custom_prompt in data["product_seo"]["text"], "Custom prompt not active"
+    log(f"  ✅ Custom prompt active, is_default=false, version={data['product_seo']['active_version']}")
+    
+    # 6d. PUT too short (validation)
+    log("  6d. PUT /api/settings/prompts/product_seo (too short)")
+    r = requests.put(f"{BASE_URL}/settings/prompts/product_seo", headers=headers(admin_token), 
+                     json={"text": "x"})
+    assert r.status_code == 400, f"Expected 400, got {r.status_code}"
+    log(f"  ✅ Too-short prompt rejected with 400")
+    
+    # 6e. POST restore-default
+    log("  6e. POST /api/settings/prompts/product_seo/restore-default")
+    r = requests.post(f"{BASE_URL}/settings/prompts/product_seo/restore-default", 
+                      headers=headers(admin_token))
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}"
+    log(f"  ✅ Restore default successful")
+    
+    # 6f. Verify default restored
+    log("  6f. GET /api/settings/prompts - verify is_default=true")
+    r = requests.get(f"{BASE_URL}/settings/prompts", headers=headers(admin_token))
+    assert r.status_code == 200
+    data = r.json()
+    assert data["product_seo"]["is_default"] == True, "Should be default again"
+    log(f"  ✅ Default restored, is_default=true")
+    
+    # 6g. Invalid prompt type
+    log("  6g. GET /api/settings/prompts/badtype/history")
+    r = requests.get(f"{BASE_URL}/settings/prompts/badtype/history", headers=headers(admin_token))
+    assert r.status_code == 404, f"Expected 404, got {r.status_code}"
+    log(f"  ✅ Invalid prompt type returns 404")
+
+def test_7_role_gating_viewer():
+    """TEST 7: Role gating - viewer must get 403 on all settings endpoints"""
+    log("TEST 7: Role gating (viewer)")
+    
+    endpoints = [
+        ("GET", "/settings/config", None),
+        ("PUT", "/settings/shopify", {"mode": "demo"}),
+        ("PUT", "/settings/ai/openai", {"model": "gpt-5.4"}),
+        ("GET", "/settings/ai/openai/test", None),
+        ("GET", "/settings/prompts", None),
+        ("PUT", "/settings/prompts/product_seo", {"text": "x" * 60}),
+    ]
+    
+    for method, path, payload in endpoints:
+        log(f"  {method} {path}")
+        if method == "GET":
+            r = requests.get(f"{BASE_URL}{path}", headers=headers(viewer_token))
+        elif method == "PUT":
+            r = requests.put(f"{BASE_URL}{path}", headers=headers(viewer_token), json=payload)
+        elif method == "POST":
+            r = requests.post(f"{BASE_URL}{path}", headers=headers(viewer_token), json=payload or {})
         
-    def log(self, message: str, level: str = "INFO"):
-        """Log test messages"""
-        prefix = "✅" if level == "PASS" else "❌" if level == "FAIL" else "ℹ️"
-        print(f"{prefix} {message}")
+        assert r.status_code == 403, f"Expected 403 for viewer on {method} {path}, got {r.status_code}"
+    
+    log(f"  ✅ All {len(endpoints)} endpoints correctly return 403 for viewer")
+
+def test_8_regression_seo_only_allowlist():
+    """TEST 8: Regression - SEO-only allowlist still enforced"""
+    log("TEST 8: Regression - SEO-only allowlist")
+    
+    # Get a demo product
+    log("  8a. GET /api/products (get test product)")
+    r = requests.get(f"{BASE_URL}/products?page=1&page_size=1", 
+                     headers=headers(admin_token))
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}"
+    data = r.json()
+    items = data.get("items", [])
+    
+    # If no products, seed demo data first
+    if len(items) == 0:
+        log("  No products found, seeding demo data...")
+        r = requests.post(f"{BASE_URL}/sync", headers=headers(admin_token))
+        assert r.status_code == 200, f"Sync failed: {r.status_code}"
+        time.sleep(5)  # Wait for sync
         
-    def assert_true(self, condition: bool, message: str, details: Any = None):
-        """Assert a condition and log result"""
-        if condition:
-            self.log(f"PASS: {message}", "PASS")
-            self.passed_count += 1
-            self.results.append({"status": "PASS", "message": message})
-        else:
-            self.log(f"FAIL: {message}", "FAIL")
-            if details:
-                print(f"   Details: {json.dumps(details, indent=2)}")
-            self.failed_count += 1
-            self.results.append({"status": "FAIL", "message": message, "details": details})
-            
-    def login(self):
-        """Login and get JWT token"""
-        self.log("=== TEST: Admin Login ===")
-        try:
-            response = requests.post(
-                f"{BASE_URL}/auth/login",
-                json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
-                timeout=10
-            )
-            self.assert_true(response.status_code == 200, "Login returns 200", response.text)
-            
-            if response.status_code == 200:
-                data = response.json()
-                self.token = data.get("token")
-                self.assert_true(self.token is not None, "JWT token present in response", data)
-                
-                if self.token:
-                    self.headers = {"Authorization": f"Bearer {self.token}"}
-                    self.log(f"Login successful, token: {self.token[:20]}...")
-                    return True
-        except Exception as e:
-            self.assert_true(False, f"Login failed with exception: {e}")
-        return False
+        r = requests.get(f"{BASE_URL}/products?page=1&page_size=1", 
+                         headers=headers(admin_token))
+        assert r.status_code == 200, f"Expected 200, got {r.status_code}"
+        items = r.json().get("items", [])
+    
+    assert len(items) > 0, "No products found even after sync"
+    
+    global test_product_id
+    test_product_id = items[0]["id"]
+    log(f"  ✅ Got test product: {test_product_id}")
+    
+    # 8b. PATCH with forbidden field (price)
+    log("  8b. PATCH /api/products/{id}/seo-draft with forbidden field (price)")
+    r = requests.patch(f"{BASE_URL}/products/{test_product_id}/seo-draft", 
+                       headers=headers(admin_token), 
+                       json={"price": "1.00"})
+    assert r.status_code == 403, f"Expected 403, got {r.status_code}"
+    assert "NON_SEO_FIELD_WRITE_DENIED" in r.text, "Expected NON_SEO_FIELD_WRITE_DENIED error"
+    log(f"  ✅ Forbidden field (price) rejected with 403 NON_SEO_FIELD_WRITE_DENIED")
+    
+    # 8c. POST publish-seo with forbidden field (vendor)
+    log("  8c. POST /api/products/{id}/publish-seo with forbidden field (vendor)")
+    r = requests.post(f"{BASE_URL}/products/{test_product_id}/publish-seo", 
+                      headers=headers(admin_token), 
+                      json={"vendor": "x"})
+    assert r.status_code == 403, f"Expected 403, got {r.status_code}"
+    assert "NON_SEO_FIELD_WRITE_DENIED" in r.text, "Expected NON_SEO_FIELD_WRITE_DENIED error"
+    log(f"  ✅ Forbidden field (vendor) rejected with 403 NON_SEO_FIELD_WRITE_DENIED")
+    
+    # 8d. PATCH with SEO-only fields (should work)
+    log("  8d. PATCH /api/products/{id}/seo-draft with SEO-only fields")
+    r = requests.patch(f"{BASE_URL}/products/{test_product_id}/seo-draft", 
+                       headers=headers(admin_token), 
+                       json={"seo_title": "Test SEO Title", "meta_description": "Test meta description"})
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+    log(f"  ✅ SEO-only draft PATCH works (200)")
+
+def revert_all_config():
+    """CRITICAL: Revert all config to DEMO state"""
+    log("REVERTING ALL CONFIG TO DEMO STATE")
+    
+    # 1. Revert Shopify to demo+mock
+    log("  1. PUT /api/settings/shopify (demo+mock)")
+    r = requests.put(f"{BASE_URL}/settings/shopify", headers=headers(admin_token), 
+                     json={"mode": "demo", "mock_mode": True})
+    assert r.status_code == 200, f"Revert shopify failed: {r.status_code}"
+    
+    # 2. Delete Shopify token
+    log("  2. DELETE /api/settings/shopify/token")
+    r = requests.delete(f"{BASE_URL}/settings/shopify/token", headers=headers(admin_token))
+    assert r.status_code == 200, f"Delete token failed: {r.status_code}"
+    
+    # 3. Delete all AI provider keys and disable
+    for provider in ["openai", "anthropic", "gemini", "deepseek"]:
+        log(f"  3.{provider}. DELETE /api/settings/ai/{provider}/key")
+        r = requests.delete(f"{BASE_URL}/settings/ai/{provider}/key", headers=headers(admin_token))
+        assert r.status_code == 200, f"Delete {provider} key failed: {r.status_code}"
         
-    def test_connection(self):
-        """Test 1: Connection test endpoint"""
-        self.log("\n=== TEST 1: Connection Test (GET /api/settings/shopify/test) ===")
+        log(f"  3.{provider}. PUT /api/settings/ai/{provider} (enabled=false)")
+        r = requests.put(f"{BASE_URL}/settings/ai/{provider}", headers=headers(admin_token), 
+                         json={"enabled": False})
+        assert r.status_code == 200, f"Disable {provider} failed: {r.status_code}"
+    
+    # 4. Reset default provider to openai
+    log("  4. PUT /api/settings/ai (default_provider=openai)")
+    r = requests.put(f"{BASE_URL}/settings/ai", headers=headers(admin_token), 
+                     json={"default_provider": "openai"})
+    assert r.status_code == 200, f"Reset default provider failed: {r.status_code}"
+    
+    log("✅ ALL CONFIG REVERTED TO DEMO STATE")
+
+def main():
+    global admin_token, viewer_token
+    
+    print("\n" + "="*80)
+    print("PHASE-6 SECURE CONFIGURATION BACKEND TESTING")
+    print("="*80 + "\n")
+    
+    # Login
+    print("SETUP: Logging in...")
+    admin_token = login(ADMIN_EMAIL, ADMIN_PASSWORD)
+    viewer_token = login(VIEWER_EMAIL, VIEWER_PASSWORD)
+    print(f"✅ Admin logged in: {ADMIN_EMAIL}")
+    print(f"✅ Viewer logged in: {VIEWER_EMAIL}\n")
+    
+    # Run tests
+    tests = [
+        test_1_get_config_structure,
+        test_2_secret_write_only,
+        test_3_per_provider_test_connection,
+        test_4_default_provider_validation,
+        test_5_live_safety,
+        test_6_prompt_manager,
+        test_7_role_gating_viewer,
+        test_8_regression_seo_only_allowlist,
+    ]
+    
+    passed = 0
+    failed = 0
+    
+    for test_func in tests:
         try:
-            response = requests.get(f"{BASE_URL}/settings/shopify/test", headers=self.headers, timeout=10)
-            self.assert_true(response.status_code == 200, "Connection test returns 200")
-            
-            if response.status_code == 200:
-                data = response.json()
-                self.log(f"Connection response: {json.dumps(data, indent=2)}")
-                
-                # In demo mode, expect connected=false, status="demo_mode"
-                self.assert_true("connected" in data or "status" in data, 
-                               "Response contains connection status", data)
-                
-                # Verify no raw Shopify token exposed
-                response_str = json.dumps(data).lower()
-                has_token = any(word in response_str for word in ["token", "secret", "password", "key"])
-                self.assert_true(not has_token or "demo_mode" in response_str, 
-                               "No raw Shopify credentials exposed in response")
-                
+            print(f"\n{test_func.__name__.replace('_', ' ').upper()}")
+            print("-" * 80)
+            test_func()
+            passed += 1
+            print(f"✅ {test_func.__name__} PASSED\n")
+        except AssertionError as e:
+            failed += 1
+            print(f"❌ {test_func.__name__} FAILED: {e}\n")
         except Exception as e:
-            self.assert_true(False, f"Connection test failed: {e}")
-            
-    def test_full_sync(self) -> Optional[str]:
-        """Test 2: LIVE full sync with pagination"""
-        self.log("\n=== TEST 2: LIVE Full Sync (POST /api/shopify/live-sync?full_resync=true) ===")
-        job_id = None
-        try:
-            response = requests.post(
-                f"{BASE_URL}/shopify/live-sync?full_resync=true",
-                headers=self.headers,
-                timeout=10
-            )
-            self.assert_true(response.status_code == 200, "Live sync endpoint returns 200")
-            
-            if response.status_code == 200:
-                data = response.json()
-                job_id = data.get("job_id")
-                self.assert_true(job_id is not None, "Job ID returned", data)
-                self.log(f"Job created: {job_id}")
-                
-                # Poll job until completion (max 120 seconds)
-                if job_id:
-                    self.log("Polling job status...")
-                    max_wait = 120
-                    start_time = time.time()
-                    job_data = None
-                    
-                    while time.time() - start_time < max_wait:
-                        job_response = requests.get(f"{BASE_URL}/jobs/{job_id}", headers=self.headers, timeout=10)
-                        if job_response.status_code == 200:
-                            job_data = job_response.json()
-                            status = job_data.get("status")
-                            progress = job_data.get("progress", 0)
-                            self.log(f"Job status: {status}, progress: {progress}%")
-                            
-                            if status == "completed":
-                                self.log("Job completed successfully!")
-                                break
-                            elif status == "failed":
-                                self.assert_true(False, "Job failed", job_data)
-                                break
-                        time.sleep(2)
-                    
-                    if job_data:
-                        status = job_data.get("status")
-                        self.assert_true(status == "completed", "Job status is 'completed'", job_data)
-                        
-                        if status == "completed":
-                            pages = job_data.get("pages", 0)
-                            failed = job_data.get("failed", 0)
-                            progress = job_data.get("progress", 0)
-                            
-                            self.assert_true(pages >= 2, f"Pagination happened (pages >= 2, got {pages})", job_data)
-                            self.assert_true(failed == 0, f"No failed items (failed == 0, got {failed})", job_data)
-                            self.assert_true(progress == 100, f"Progress is 100% (got {progress})", job_data)
-                            
-                            # Check for counters
-                            counters_present = any(k in job_data for k in ["new", "updated", "unchanged"])
-                            self.assert_true(counters_present, "Counters (new/updated/unchanged) present", job_data)
-                    else:
-                        self.assert_true(False, "Job did not complete within 120 seconds")
-                        
-        except Exception as e:
-            self.assert_true(False, f"Full sync test failed: {e}")
-            
-        return job_id
-        
-    def test_live_products(self):
-        """Test 3: Live product ingestion"""
-        self.log("\n=== TEST 3: Live Product Ingestion (GET /api/products?page_size=10&source=live) ===")
-        try:
-            # Admin can explicitly query live data_source even in demo mode
-            response = requests.get(f"{BASE_URL}/products?page_size=10&source=live", headers=self.headers, timeout=10)
-            self.assert_true(response.status_code == 200, "Products endpoint returns 200")
-            
-            if response.status_code == 200:
-                data = response.json()
-                items = data.get("items", [])
-                self.assert_true(len(items) > 0, f"Products returned (got {len(items)} items)", data)
-                
-                if items:
-                    # Check every item has data_source == "live"
-                    all_live = all(item.get("data_source") == "live" for item in items)
-                    self.assert_true(all_live, "All products have data_source='live'", 
-                                   [item.get("data_source") for item in items])
-                    
-                    # Check SEO-relevant fields exist
-                    first_item = items[0]
-                    required_fields = ["handle", "title", "shopify_product_id", "status_bucket"]
-                    for field in required_fields:
-                        self.assert_true(field in first_item, f"Product has '{field}' field", first_item.keys())
-                        
-                    self.log(f"Sample product: {first_item.get('title')} (handle: {first_item.get('handle')})")
-                    
-        except Exception as e:
-            self.assert_true(False, f"Live products test failed: {e}")
-            
-    def test_live_collections(self):
-        """Test 3b: Live collection ingestion"""
-        self.log("\n=== TEST 3b: Live Collection Ingestion (GET /api/collections?page_size=5&source=live) ===")
-        try:
-            # Admin can explicitly query live data_source even in demo mode
-            response = requests.get(f"{BASE_URL}/collections?page_size=5&source=live", headers=self.headers, timeout=10)
-            self.assert_true(response.status_code == 200, "Collections endpoint returns 200")
-            
-            if response.status_code == 200:
-                data = response.json()
-                total = data.get("total", 0)
-                self.assert_true(total > 0, f"Collections exist (total > 0, got {total})", data)
-                
-        except Exception as e:
-            self.assert_true(False, f"Live collections test failed: {e}")
-            
-    def test_demo_live_separation(self):
-        """Test 4: DEMO/LIVE never mixed"""
-        self.log("\n=== TEST 4: DEMO/LIVE Separation (GET /api/products?source=live) ===")
-        try:
-            # Query live data_source explicitly
-            response = requests.get(f"{BASE_URL}/products?page_size=50&source=live", headers=self.headers, timeout=10)
-            self.assert_true(response.status_code == 200, "Products endpoint returns 200")
-            
-            if response.status_code == 200:
-                data = response.json()
-                items = data.get("items", [])
-                
-                if items:
-                    # All items must be data_source=="live" (no demo records leaking)
-                    data_sources = set(item.get("data_source") for item in items)
-                    self.assert_true(data_sources == {"live"}, 
-                                   "Only 'live' data_source present (no demo leaking)", 
-                                   list(data_sources))
-                    
-        except Exception as e:
-            self.assert_true(False, f"DEMO/LIVE separation test failed: {e}")
-            
-    def test_incremental_sync(self):
-        """Test 5: Incremental sync"""
-        self.log("\n=== TEST 5: Incremental Sync (POST /api/shopify/live-sync?full_resync=false) ===")
-        try:
-            response = requests.post(
-                f"{BASE_URL}/shopify/live-sync?full_resync=false",
-                headers=self.headers,
-                timeout=10
-            )
-            self.assert_true(response.status_code == 200, "Incremental sync endpoint returns 200")
-            
-            if response.status_code == 200:
-                data = response.json()
-                job_id = data.get("job_id")
-                self.assert_true(job_id is not None, "Job ID returned", data)
-                
-                if job_id:
-                    self.log("Polling incremental sync job...")
-                    max_wait = 120
-                    start_time = time.time()
-                    job_data = None
-                    
-                    while time.time() - start_time < max_wait:
-                        job_response = requests.get(f"{BASE_URL}/jobs/{job_id}", headers=self.headers, timeout=10)
-                        if job_response.status_code == 200:
-                            job_data = job_response.json()
-                            status = job_data.get("status")
-                            
-                            if status in ["completed", "failed"]:
-                                break
-                        time.sleep(2)
-                    
-                    if job_data:
-                        status = job_data.get("status")
-                        self.assert_true(status == "completed", "Incremental sync completed", job_data)
-                        
-                        if status == "completed":
-                            new_count = job_data.get("new", 0)
-                            self.assert_true(new_count == 0, 
-                                           f"No new items created (new == 0, got {new_count})", 
-                                           job_data)
-                            
-        except Exception as e:
-            self.assert_true(False, f"Incremental sync test failed: {e}")
-            
-    def test_draft_survival(self):
-        """Test 6: Non-destructive drafts survive re-sync"""
-        self.log("\n=== TEST 6: Draft Survival Through Re-sync ===")
-        try:
-            # Get a live product (admin can query live source explicitly)
-            response = requests.get(f"{BASE_URL}/products?page_size=1&source=live", headers=self.headers, timeout=10)
-            if response.status_code != 200:
-                self.assert_true(False, "Could not fetch products for draft test")
-                return
-                
-            data = response.json()
-            items = data.get("items", [])
-            if not items:
-                self.assert_true(False, "No products available for draft test")
-                return
-                
-            product_id = items[0].get("id")
-            self.log(f"Testing with product: {product_id}")
-            
-            # Create a draft
-            draft_payload = {
-                "seo_title": "DRAFT KEEP ME",
-                "meta_description": "Draft must survive re-sync of at least forty chars here."
-            }
-            draft_response = requests.patch(
-                f"{BASE_URL}/products/{product_id}/seo-draft",
-                headers=self.headers,
-                json=draft_payload,
-                timeout=10
-            )
-            self.assert_true(draft_response.status_code == 200, "Draft creation returns 200", draft_response.text)
-            
-            if draft_response.status_code == 200:
-                # Run full re-sync
-                self.log("Running full re-sync to test draft survival...")
-                sync_response = requests.post(
-                    f"{BASE_URL}/shopify/live-sync?full_resync=true",
-                    headers=self.headers,
-                    timeout=10
-                )
-                
-                if sync_response.status_code == 200:
-                    job_id = sync_response.json().get("job_id")
-                    
-                    # Poll until complete
-                    max_wait = 120
-                    start_time = time.time()
-                    completed = False
-                    
-                    while time.time() - start_time < max_wait:
-                        job_response = requests.get(f"{BASE_URL}/jobs/{job_id}", headers=self.headers, timeout=10)
-                        if job_response.status_code == 200:
-                            job_data = job_response.json()
-                            if job_data.get("status") == "completed":
-                                completed = True
-                                break
-                        time.sleep(2)
-                    
-                    self.assert_true(completed, "Re-sync completed")
-                    
-                    if completed:
-                        # Check if draft survived
-                        product_response = requests.get(
-                            f"{BASE_URL}/products/{product_id}",
-                            headers=self.headers,
-                            timeout=10
-                        )
-                        
-                        if product_response.status_code == 200:
-                            product = product_response.json()
-                            has_draft = product.get("has_draft")
-                            draft_title = product.get("draft_seo_title")
-                            
-                            self.assert_true(has_draft == True, "Product still has_draft=true", product)
-                            self.assert_true(draft_title == "DRAFT KEEP ME", 
-                                           f"Draft title survived (expected 'DRAFT KEEP ME', got '{draft_title}')", 
-                                           product)
-                            
-        except Exception as e:
-            self.assert_true(False, f"Draft survival test failed: {e}")
-            
-    def test_seo_publish_roundtrip(self):
-        """Test 7: SEO publish round-trip + verification + audit"""
-        self.log("\n=== TEST 7: SEO Publish Round-trip + Verification + Audit ===")
-        try:
-            response = requests.post(
-                f"{BASE_URL}/shopify/verify-publish",
-                headers=self.headers,
-                timeout=10
-            )
-            self.assert_true(response.status_code == 200, "Verify-publish endpoint returns 200", response.text)
-            
-            if response.status_code == 200:
-                data = response.json()
-                self.log(f"Verify-publish response: {json.dumps(data, indent=2)}")
-                
-                verified_match = data.get("verified_match")
-                verified_shopify_value = data.get("verified_shopify_value")
-                mock = data.get("mock")
-                audit_id = data.get("audit_id")
-                
-                self.assert_true(verified_match == True, "verified_match is true", data)
-                self.assert_true(verified_shopify_value is not None, "verified_shopify_value present", data)
-                self.assert_true(mock == True, "mock is true", data)
-                self.assert_true(audit_id is not None, "audit_id present", data)
-                
-                # Check audit log
-                if audit_id:
-                    self.log(f"Checking audit log for {audit_id}...")
-                    audit_response = requests.get(
-                        f"{BASE_URL}/audit?page=1&page_size=5",
-                        headers=self.headers,
-                        timeout=10
-                    )
-                    
-                    if audit_response.status_code == 200:
-                        audit_data = audit_response.json()
-                        audit_items = audit_data.get("items", [])
-                        audit_ids = [item.get("id") for item in audit_items]
-                        
-                        self.assert_true(audit_id in audit_ids, 
-                                       f"Audit ID {audit_id} appears in audit log", 
-                                       audit_ids)
-                        
-        except Exception as e:
-            self.assert_true(False, f"SEO publish round-trip test failed: {e}")
-            
-    def test_sync_state_recovery(self):
-        """Test 8: sync_state recovery"""
-        self.log("\n=== TEST 8: Sync State Recovery (GET /api/sync/status) ===")
-        try:
-            response = requests.get(f"{BASE_URL}/sync/status", headers=self.headers, timeout=10)
-            self.assert_true(response.status_code == 200, "Sync status endpoint returns 200")
-            
-            if response.status_code == 200:
-                data = response.json()
-                sync_state = data.get("sync_state", {})
-                
-                if sync_state:
-                    status = sync_state.get("status")
-                    in_progress = sync_state.get("in_progress")
-                    
-                    self.assert_true(status == "ok", f"sync_state.status is 'ok' (got '{status}')", sync_state)
-                    self.assert_true(in_progress != True, 
-                                   f"sync_state NOT stuck with in_progress=true (got {in_progress})", 
-                                   sync_state)
-                else:
-                    self.log("No sync_state found (may be initial state)")
-                    
-        except Exception as e:
-            self.assert_true(False, f"Sync state recovery test failed: {e}")
-            
-    def test_security_forbidden_writes(self):
-        """Test 9: SECURITY - forbidden non-SEO writes"""
-        self.log("\n=== TEST 9: SECURITY - Forbidden Non-SEO Field Writes ===")
-        
-        try:
-            # Get a live product (admin can query live source explicitly)
-            response = requests.get(f"{BASE_URL}/products?page_size=1&source=live", headers=self.headers, timeout=10)
-            if response.status_code != 200:
-                self.assert_true(False, "Could not fetch products for security test")
-                return
-                
-            data = response.json()
-            items = data.get("items", [])
-            if not items:
-                self.assert_true(False, "No products available for security test")
-                return
-                
-            product_id = items[0].get("id")
-            self.log(f"Testing security with product: {product_id}")
-            
-            # Get initial product state
-            initial_response = requests.get(f"{BASE_URL}/products/{product_id}", headers=self.headers, timeout=10)
-            initial_product = initial_response.json() if initial_response.status_code == 200 else {}
-            
-            # Test forbidden payloads on publish-seo endpoint
-            forbidden_payloads = [
-                {"price": "1.00"},
-                {"inventory": 5},
-                {"sku": "X"},
-                {"barcode": "1"},
-                {"vendor": "Evil"},
-                {"title": "Hacked"},
-                {"product_title": "Hacked"},
-                {"status": "ARCHIVED"},
-                {"variants": [{"price": "0"}]},
-                {"seo_title": "ok", "price": "1"},  # mixed payload
-            ]
-            
-            for payload in forbidden_payloads:
-                self.log(f"Testing forbidden payload: {payload}")
-                
-                # Test on publish-seo
-                publish_response = requests.post(
-                    f"{BASE_URL}/products/{product_id}/publish-seo",
-                    headers=self.headers,
-                    json=payload,
-                    timeout=10
-                )
-                
-                self.assert_true(publish_response.status_code == 403, 
-                               f"Forbidden payload returns 403 for publish-seo: {payload}", 
-                               publish_response.text)
-                
-                if publish_response.status_code == 403:
-                    response_text = publish_response.text
-                    self.assert_true("NON_SEO_FIELD_WRITE_DENIED" in response_text, 
-                                   f"Response contains 'NON_SEO_FIELD_WRITE_DENIED' for: {payload}", 
-                                   response_text)
-                
-                # Test on seo-draft
-                draft_response = requests.patch(
-                    f"{BASE_URL}/products/{product_id}/seo-draft",
-                    headers=self.headers,
-                    json=payload,
-                    timeout=10
-                )
-                
-                self.assert_true(draft_response.status_code == 403, 
-                               f"Forbidden payload returns 403 for seo-draft: {payload}", 
-                               draft_response.text)
-                
-            # Verify commerce fields unchanged
-            final_response = requests.get(f"{BASE_URL}/products/{product_id}", headers=self.headers, timeout=10)
-            if final_response.status_code == 200:
-                final_product = final_response.json()
-                
-                # Check that commerce fields are unchanged (if they exist)
-                commerce_fields = ["price", "inventory", "sku", "barcode", "vendor"]
-                for field in commerce_fields:
-                    if field in initial_product:
-                        initial_value = initial_product.get(field)
-                        final_value = final_product.get(field)
-                        self.assert_true(initial_value == final_value, 
-                                       f"Commerce field '{field}' unchanged after denied attempts", 
-                                       {"initial": initial_value, "final": final_value})
-                        
-        except Exception as e:
-            self.assert_true(False, f"Security test failed: {e}")
-            
-    def run_all_tests(self):
-        """Run all Phase 3.5 tests"""
-        print("\n" + "="*80)
-        print("PHASE 3.5 BACKEND API TESTING - Real Shopify Live Sync")
-        print("="*80 + "\n")
-        
-        # Login first
-        if not self.login():
-            self.log("Login failed, cannot continue tests", "FAIL")
-            return
-            
-        # Run all tests
-        self.test_connection()
-        self.test_full_sync()
-        self.test_live_products()
-        self.test_live_collections()
-        self.test_demo_live_separation()
-        self.test_incremental_sync()
-        self.test_draft_survival()
-        self.test_seo_publish_roundtrip()
-        self.test_sync_state_recovery()
-        self.test_security_forbidden_writes()
-        
-        # Summary
-        print("\n" + "="*80)
-        print("TEST SUMMARY")
-        print("="*80)
-        print(f"✅ PASSED: {self.passed_count}")
-        print(f"❌ FAILED: {self.failed_count}")
-        print(f"📊 TOTAL: {self.passed_count + self.failed_count}")
-        print("="*80 + "\n")
-        
-        if self.failed_count > 0:
-            print("FAILED TESTS:")
-            for result in self.results:
-                if result["status"] == "FAIL":
-                    print(f"  ❌ {result['message']}")
-                    if "details" in result:
-                        print(f"     Details: {result['details']}")
-        
-        return self.failed_count == 0
+            failed += 1
+            print(f"❌ {test_func.__name__} ERROR: {e}\n")
+    
+    # CRITICAL: Revert config
+    print("\n" + "="*80)
+    try:
+        revert_all_config()
+    except Exception as e:
+        print(f"❌ CONFIG REVERT FAILED: {e}")
+        print("⚠️  WARNING: App may be in LIVE mode or have test secrets!")
+    
+    # Summary
+    print("\n" + "="*80)
+    print("TEST SUMMARY")
+    print("="*80)
+    print(f"PASSED: {passed}/{len(tests)}")
+    print(f"FAILED: {failed}/{len(tests)}")
+    
+    if failed == 0:
+        print("\n✅ ALL TESTS PASSED - Phase-6 secure configuration is working correctly")
+    else:
+        print(f"\n❌ {failed} TEST(S) FAILED")
+    
+    print("="*80 + "\n")
 
 if __name__ == "__main__":
-    runner = TestRunner()
-    success = runner.run_all_tests()
-    exit(0 if success else 1)
+    main()
